@@ -198,6 +198,8 @@ export type EventProperties = {
   conflict_detected: { count: number }
   conflict_resolved_manual: undefined
   conflict_dismissed: undefined
+  /** The user slid their plan rotation so a chosen session comes next. */
+  rotation_shifted: { positions: number; focus: string }
   // §28 L16 — the funnel step between "connected a calendar" and "started a
   // session": did the plan itself actually get built. Fired once, right after
   // a successful generatePlan() call in onboarding.

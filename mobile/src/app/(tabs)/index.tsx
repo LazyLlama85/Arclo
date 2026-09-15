@@ -48,6 +48,8 @@ import { describeSaveError } from '@/lib/saveErrors'
 import { dedupeScheduledWorkouts } from '@/lib/dedupeSchedule'
 import { invalidateTrainingData } from '@/lib/queryInvalidation'
 import { suggestNextSlot, rescheduleWorkout, type SlotSuggestion } from '@/lib/reschedule'
+import { getPlanRotation, shiftPlanRotation } from '@/lib/generatePlan'
+import { rotationDeltaFor } from '@/lib/rotationShift'
 import { getQuickSuggestion } from '@/lib/quickSuggestion'
 import { readinessFromHistory, intensityFromReadiness } from '@/lib/fitnessInsights'
 import { describeSession } from '@/lib/sessionRationale'
@@ -211,6 +213,13 @@ interface HeroPreviewExercise {
   primary_muscles: string[] | null
 }
 
+// A deload week renames the focus ("Push (Deload)"); the rotation cycle stores
+// the bare label, so compare on the base. Mirrors generatePlan's own
+// stripDeloadFocus rather than importing it — that one is module-private there.
+function stripDeload(focus: string): string {
+  return focus.replace(/\s*\(Deload\)\s*$/i, '').trim()
+}
+
 // A single "today's context" item. The whole Home feed used to stack up to eight of
 // these as full-width cards; now only the highest-priority *eligible* one renders as
 // a full banner (`primary`), and every other eligible one is demoted to a compact
@@ -270,6 +279,7 @@ export default function ScheduleScreen() {
   // is only ever one day to show.
   const [refreshing, setRefreshing] = useState(false)
   const [rescheduling, setRescheduling] = useState(false)
+  const [shiftingRotation, setShiftingRotation] = useState(false)
   const [showRecovery, setShowRecovery] = useState(false)
   const [editingWorkout, setEditingWorkout] = useState<ScheduledWorkout | null>(null)
   const [addWorkoutOpen, setAddWorkoutOpen] = useState(false)
@@ -422,6 +432,34 @@ export default function ScheduleScreen() {
   // and the preview hasn't resolved yet too, so the banner defaults to the
   // honest/soft copy rather than flashing the confident one first.
   const missedRescheduleTight = missedIsStructured && (!reschedulePreview || reschedulePreview.tightRecovery)
+
+  // ── "Do Push next" — slide the rotation instead of hunting for a free day ──
+  //
+  // Founder, 2026-09-14, on his own six-day plan: "if I miss push I want to do
+  // it next". Rescheduling answers a different question (WHEN can this session
+  // go?) and on a 6-day split the honest answer is often "nowhere good" — which
+  // is why `missedRescheduleTight` hides this banner entirely for exactly the
+  // people who feel the problem most. Shifting the rotation answers the question
+  // they actually asked (WHAT do I train next?) and always has an answer,
+  // because it moves no dates at all.
+  const { data: rotation } = useQuery({
+    queryKey: ['plan_rotation', userId, missed[0]?.id],
+    queryFn: () => getPlanRotation(supabase, userId),
+    enabled: !!userId && missed.length > 0 && missed[0]?.source === 'plan',
+    staleTime: 5 * 60 * 1000,
+  })
+
+  // The slide that makes the missed session the next one. Null when there is
+  // nothing to offer: no plan cycle, or the rotation already continues
+  // correctly (missing the last session of a cycle changes nothing).
+  const rotationShift = useMemo(() => {
+    if (!rotation || !missed.length) return null
+    const target = rotation.cycle.indexOf(stripDeload(missed[0].focus))
+    if (target < 0) return null
+    const delta = rotationDeltaFor(rotation.nextIndex, target, rotation.cycle.length)
+    if (delta === 0) return null
+    return { delta, focus: rotation.cycle[target], nextFocus: rotation.cycle[rotation.nextIndex] }
+  }, [rotation, missed])
 
   const { data: checkin } = useQuery({
     queryKey: ['recovery_today', userId],
@@ -1110,6 +1148,46 @@ export default function ScheduleScreen() {
     router.push({ pathname: '/quick-workout', params: { minutes: '15' } })
   }
 
+  // Confirm first, always. This rewrites what every upcoming session contains,
+  // and doing that without asking is the one behaviour this feature must not
+  // have. Reversible through the same control: shifting again by the remaining
+  // positions lands back where you started.
+  const handleRotationShift = () => {
+    if (!rotationShift || shiftingRotation) return
+    const { delta, focus } = rotationShift
+    Alert.alert(
+      `Do ${focus} next?`,
+      `Your rotation slides so ${focus} is your next session, and everything after it follows in order.
+
+No dates or times change.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: `Do ${focus} next`,
+          onPress: async () => {
+            setShiftingRotation(true)
+            try {
+              const changed = await shiftPlanRotation(supabase, userId, delta)
+              if (!changed) {
+                Alert.alert('Could not change your rotation', 'Nothing was changed. Please try again.')
+                return
+              }
+              track('rotation_shifted', { positions: delta, focus })
+              queryClient.invalidateQueries({ queryKey: ['scheduled_workouts'] })
+              queryClient.invalidateQueries({ queryKey: ['missed_workouts', userId] })
+              queryClient.invalidateQueries({ queryKey: ['next_workout'] })
+              queryClient.invalidateQueries({ queryKey: ['plan_rotation', userId] })
+            } catch {
+              Alert.alert('Could not change your rotation', 'Something went wrong. Please try again.')
+            } finally {
+              setShiftingRotation(false)
+            }
+          },
+        },
+      ],
+    )
+  }
+
   const handleReschedule = async (workout: ScheduledWorkout) => {
     if (rescheduling) return
     setRescheduling(true)
@@ -1564,7 +1642,12 @@ export default function ScheduleScreen() {
     // array takes the slot instead (founder feedback: "let them move on").
     {
       id: 'missed',
-      eligible: missed.length > 0 && !missedRescheduleTight,
+      // A rotation shift is a real action even when no well-spaced day exists,
+      // so it also makes this banner eligible. That matters most for exactly the
+      // people the old rule shut out: on a 6-day split every day is taken, the
+      // reschedule preview is always "tight", and a missed Push therefore
+      // surfaced NOTHING at all.
+      eligible: missed.length > 0 && (!missedRescheduleTight || !!rotationShift),
       primary: () => missed.length > 0 ? (
         <View style={styles.missedBanner}>
           <View style={styles.missedIcon}>
@@ -1574,19 +1657,46 @@ export default function ScheduleScreen() {
             <Text style={styles.missedTitle}>
               Missed {missed[0].focus}{missed.length > 1 ? ` +${missed.length - 1} more` : ''}
             </Text>
-            <Text style={styles.missedSub}>No worries — let's find a new slot.</Text>
+            {rotationShift ? (
+              // Both actions stay reachable. Sliding the rotation is the primary
+              // button because it is the one that always works, but "find a new
+              // slot" was the ONLY action here before and must not disappear for
+              // plan users. Same two-action shape the conflict banner uses.
+              <Text style={styles.missedSub}>
+                {`Do ${rotationShift.focus} next and the rest follows.  ·  `}
+                <Text
+                  onPress={() => handleReschedule(missed[0])}
+                  style={{ color: C.primary, fontFamily: 'Inter_700Bold' }}
+                >
+                  Find a new slot
+                </Text>
+              </Text>
+            ) : (
+              <Text style={styles.missedSub}>No worries — let's find a new slot.</Text>
+            )}
           </View>
-          <PressableScale
-            style={[styles.missedBtn, rescheduling && { opacity: 0.6 }]}
-            onPress={() => handleReschedule(missed[0])}
-            disabled={rescheduling}
-            scaleTo={0.92}
-          >
-            <Text style={styles.missedBtnText}>Reschedule</Text>
-          </PressableScale>
+          {rotationShift ? (
+            <PressableScale
+              style={[styles.missedBtn, shiftingRotation && { opacity: 0.6 }]}
+              onPress={handleRotationShift}
+              disabled={shiftingRotation}
+              scaleTo={0.92}
+            >
+              <Text style={styles.missedBtnText}>Do {rotationShift.focus} next</Text>
+            </PressableScale>
+          ) : (
+            <PressableScale
+              style={[styles.missedBtn, rescheduling && { opacity: 0.6 }]}
+              onPress={() => handleReschedule(missed[0])}
+              disabled={rescheduling}
+              scaleTo={0.92}
+            >
+              <Text style={styles.missedBtnText}>Reschedule</Text>
+            </PressableScale>
+          )}
         </View>
       ) : null,
-      chip: { icon: 'refresh', label: 'Missed workout', tint: C.primary, onPress: () => missed.length > 0 && handleReschedule(missed[0]) },
+      chip: { icon: 'refresh', label: 'Missed workout', tint: C.primary, onPress: () => { if (rotationShift) { handleRotationShift(); return } if (missed.length > 0) void handleReschedule(missed[0]) } },
     },
     // 3 — Calendar conflict, free tier only (§24/§30 L2): a real event now
     // overlaps a session. Pro gets this auto-resolved silently instead (never

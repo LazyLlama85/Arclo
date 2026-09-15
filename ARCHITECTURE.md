@@ -2251,6 +2251,15 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   this feature must not have. 21 tests (`rotationShiftPlan.test.ts`) lock the re-stamp, date/time
   invariance, focus-correct exercise selection, offset persistence + accumulation, arbitrary
   re-anchor, and the no-op/no-plan/completed-and-missed-untouched/corrupt-delta guards.
+- **Home missed banner (`app/(tabs)/index.tsx`, 2026-09-14):** the missed-session banner now leads
+  with **"Do {focus} next"** when a rotation shift is available, and keeps "Find a new slot" as a
+  secondary text action (the two-action shape the conflict banner already uses) so the original
+  reschedule path never disappears. Crucially its eligibility widened to
+  `missed.length > 0 && (!missedRescheduleTight || !!rotationShift)`: `missedRescheduleTight`
+  suppressed the banner whenever no well-spaced day existed, which on a 6-day split is ALWAYS — so
+  the people who feel a missed session most saw nothing at all. A rotation shift needs no free day,
+  so it is always a real action. Confirmed via an Alert before applying (never silent), reversible
+  by shifting again through the same control, and emits `rotation_shifted { positions, focus }`.
 - **`scheduled_workouts.split_origin_date` (migration `add_split_origin_date.sql`, 2026-09-14):**
   the day a split row was materialized FOR, written once at insert and never rewritten by any mover.
   Fixes a live duplication bug: `materializeSplit` keyed its idempotency on `planned_date` ("does a
