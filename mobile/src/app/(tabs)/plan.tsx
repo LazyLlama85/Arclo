@@ -2685,6 +2685,28 @@ export default function WorkoutsScreen() {
                       <Ionicons name="book-outline" size={15} color={C.primary} />
                       <Text style={styles.exActionText}>Form guide</Text>
                     </PressableScale>
+                    {/* History, mid-session — the moment you actually want it is
+                        standing at the rack deciding what to load, not later on
+                        the Progress tab. It existed only inside the Form guide
+                        sheet, two taps down and behind a label nobody reads as
+                        "history". Free tier included: historyHorizon clamps free
+                        users to the last 4 months rather than locking the screen,
+                        so this is a plain button with no paywall tease.
+                        Shown only when there IS something to look at —
+                        prevBySet is populated from the most recent prior session
+                        for this lift, so an exercise you have never done doesn't
+                        offer a button that opens an empty chart. */}
+                    {!!prevBySet[ex.id]?.length && (
+                      <PressableScale
+                        style={styles.exActionBtn}
+                        onPress={() => router.push({ pathname: '/exercise-progress', params: { exerciseId: ex.id, name: ex.name } })}
+                        scaleTo={0.93}
+                        accessibilityLabel={`See ${ex.name} training history`}
+                      >
+                        <Ionicons name="stats-chart-outline" size={15} color={C.primary} />
+                        <Text style={styles.exActionText}>History</Text>
+                      </PressableScale>
+                    )}
                     <PressableScale style={styles.exActionBtn} onPress={() => handleSwap(ex)} disabled={swapping} scaleTo={0.93}>
                       <Ionicons name="swap-horizontal" size={15} color={C.primary} />
                       <Text style={styles.exActionText}>Swap</Text>

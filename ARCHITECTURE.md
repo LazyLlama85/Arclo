@@ -2270,6 +2270,15 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   lookup credits nobody and leaves the sweep exactly as it was, and a failed credit-write leaves the
   row `scheduled` for the next sweep rather than downgrading it to a miss. Return value still means
   "rows marked missed". 4 new tests.
+- **History button in the in-workout exercise view (`app/(tabs)/plan.tsx`, 2026-09-15):** a
+  `History` chip in each exercise's action row, opening `exercise-progress` directly. It already
+  existed only inside the Form-guide sheet — two taps down, behind a label nobody reads as
+  "history" — while the moment you want it is standing at the rack deciding what to load.
+  **No paywall tease:** `historyHorizon` clamps free users to the last 4 months rather than locking
+  the screen, so history IS a free feature and the button is plain. Rendered only when
+  `prevBySet[ex.id]` is non-empty (populated from the most recent prior session for that lift), so
+  a never-trained exercise never offers a button onto an empty chart. The Form-sheet entry point is
+  left in place.
 - **`lib/dayStatus.ts` + Plan calendar (2026-09-15):** `summarizeDay(statuses)` replaces the Plan
   tab's `every(w => w.status === 'completed')` day rule. Founder: "cancel your plan exercise but do
   a new one ... it still shows green in plan." With two rows on one day — the planned session you
