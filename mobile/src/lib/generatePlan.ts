@@ -17,6 +17,7 @@ import {
 import { PLAN_RUNWAY_DAYS, formatLocalDate, planNeedsExtension, planExtensionWeeks } from '@/lib/planRollover'
 import { captureApiError } from '@/lib/crashReporting'
 import { fetchExcludedExerciseIds } from '@/lib/exerciseExclusions'
+import { getActiveTravelMode } from '@/lib/travelMode'
 import {
   chooseSessionStart, toMinutes, minutesToTime, type AvailabilityInputs,
 } from '@/lib/availability'
@@ -1231,6 +1232,17 @@ export async function restampFuturePlanForExperience(
 // machinery are all untouched. A rest day is the absence of a row, so it stays
 // exactly where the user put it.
 
+/** A session the shift re-stamped, shaped for `resyncMovedWorkout`. */
+export interface ShiftedSession {
+  id: string
+  focus: string
+  planned_date: string
+  planned_start_time: string
+  planned_duration_min: number
+  calendar_event_id: string | null
+  calendar_provider: 'device' | 'google' | null
+}
+
 export interface PlanRotationState {
   planId: string
   /** Focus labels in the plan's CURRENT order, e.g. Push/Pull/Legs/Push/Pull/Legs. */
@@ -1267,6 +1279,16 @@ export async function getPlanRotation(
       .limit(1)
       .maybeSingle()
     if (!plan) return null
+
+    // Not while travelling. travelSchedule stashes each session's PRE-travel
+    // exercises in `travel_restore` and puts them back verbatim when travel
+    // ends. A rotation shift rewrites exercise_ids without touching that stash,
+    // so the restore would later write the OLD focus's exercises onto a session
+    // now named something else — a Push day full of rows. Selection would also
+    // use the user's home equipment rather than what they actually have with
+    // them. Offering nothing here is the honest option; travel is short and the
+    // shift is still there afterwards.
+    if (await getActiveTravelMode(client, userId)) return null
 
     const { data: p } = await client
       .from('user_profiles')
@@ -1327,9 +1349,9 @@ export async function shiftPlanRotation(
   client: SupabaseClient,
   userId: string,
   delta: number,
-): Promise<number> {
+): Promise<ShiftedSession[]> {
   try {
-    if (!Number.isFinite(delta)) return 0
+    if (!Number.isFinite(delta)) return []
 
     const { data: plan } = await client
       .from('user_plans')
@@ -1339,14 +1361,14 @@ export async function shiftPlanRotation(
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
-    if (!plan) return 0
+    if (!plan) return []
 
     const { data: p } = await client
       .from('user_profiles')
       .select('goal, experience, equipment, days_per_week, preferred_duration_min, preferred_time_of_day, include_cardio, wake_time, bedtime, work_start, work_end, school_start, school_end')
       .eq('user_id', userId)
       .maybeSingle()
-    if (!p) return 0
+    if (!p) return []
 
     const profile: PlanProfile = {
       goal: (p.goal ?? 'general_fitness') as Goal,
@@ -1368,16 +1390,16 @@ export async function shiftPlanRotation(
     // stored offset and the re-stamped rows cannot drift apart.
     const base = buildSessionTemplates(profile.goal, profile.days_per_week, profile.include_cardio)
     const len = base.length
-    if (len < 2) return 0
+    if (len < 2) return []
 
     const oldOffset = (plan.rotation_offset as number | null) ?? 0
     const step = ((Math.floor(delta) % len) + len) % len
-    if (step === 0) return 0
+    if (step === 0) return []
 
     const todayStr = formatDate(new Date())
     const { data: future } = await client
       .from('scheduled_workouts')
-      .select('id, focus, week_index')
+      .select('id, focus, week_index, planned_date, planned_start_time, planned_duration_min, calendar_event_id, calendar_provider')
       .eq('user_id', userId)
       .eq('user_plan_id', plan.id)
       .eq('source', 'plan')
@@ -1385,7 +1407,7 @@ export async function shiftPlanRotation(
       .gte('planned_date', todayStr)
       .order('planned_date', { ascending: true })
       .order('planned_start_time', { ascending: true })
-    if (!future?.length) return 0
+    if (!future?.length) return []
 
     const rotatedOld = rotateTemplates(base, oldOffset).map(t => t.focus)
     const anchor = (indexOfFocus(rotatedOld, (future[0] as any).focus as string) + oldOffset + step) % len
@@ -1400,7 +1422,7 @@ export async function shiftPlanRotation(
       .update({ rotation_offset: newOffset })
       .eq('id', plan.id)
       .eq('user_id', userId)
-    if (offsetErr) return 0
+    if (offsetErr) return []
 
     const constraints = await fetchPlanConstraints(client, userId)
     const ctx = await buildBlockContext(client, profile, { ...constraints, rotationOffset: newOffset })
@@ -1419,7 +1441,7 @@ export async function shiftPlanRotation(
     const priorRot = Math.floor((prior ?? 0) / len)
     const focusRotation = new Map<string, number>()
 
-    let changed = 0
+    const changed: ShiftedSession[] = []
     const failedIds: string[] = []
     for (let i = 0; i < future.length; i++) {
       const w = future[i] as any
@@ -1448,7 +1470,20 @@ export async function shiftPlanRotation(
         .eq('id', w.id)
         .eq('user_id', userId)
       if (error) { failedIds.push(w.id as string); continue }
-      changed++
+      // Hand the caller what it needs to re-point the synced calendar event and
+      // the local reminder, both of which embed the focus in their text
+      // ("Arclo · Pull", "Pull starts in 30 min"). Without this the calendar
+      // keeps announcing a session the user no longer has — the exact
+      // app/calendar disagreement lib/moveWorkout.ts exists to prevent.
+      changed.push({
+        id: w.id as string,
+        focus: progression.isDeload ? `${baseFocus} (Deload)` : baseFocus,
+        planned_date: w.planned_date as string,
+        planned_start_time: w.planned_start_time as string,
+        planned_duration_min: estimateSessionMinutes(exerciseIds.length, profile.goal, progression.isDeload),
+        calendar_event_id: (w.calendar_event_id ?? null) as string | null,
+        calendar_provider: (w.calendar_provider ?? null) as ShiftedSession['calendar_provider'],
+      })
     }
 
     if (failedIds.length) {
@@ -1458,6 +1493,6 @@ export async function shiftPlanRotation(
     }
     return changed
   } catch {
-    return 0
+    return []
   }
 }

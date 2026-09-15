@@ -35,6 +35,65 @@ describe('checkMissedWorkouts', () => {
     expect(rows.every((r: any) => r.status === 'missed')).toBe(true)
   })
 
+  // ── Work you actually did is never "missed" ────────────────────────────────
+  //
+  // Founder, 2026-09-15: "if you do some of a workout but don't complete it, it
+  // will count as completed when day ends." Sessions lose their Finish tap all
+  // the time (phone dies, gym closes, you get called away). Calling that a miss
+  // breaks the streak, drags the Tempo Score down, and feeds refreshAdaptation,
+  // which reads repeated misses as a reason to CUT the user's volume.
+  it('credits a session that has logged sets instead of marking it missed', async () => {
+    const client = createFakeSupabase({
+      scheduled_workouts: [row({ id: 'trained', user_plan_id: 'p1' })],
+      workout_logs: [{ id: 'log-1', user_id: USER, scheduled_workout_id: 'trained' }],
+      set_logs: [{ id: 's1', workout_log_id: 'log-1' }],
+    })
+    const n = await checkMissedWorkouts(client, USER)
+    expect(n).toBe(0) // nothing was missed
+
+    const rows = (await client.from('scheduled_workouts').select('*').eq('user_id', USER)).data
+    expect(rows[0].status).toBe('completed')
+  })
+
+  it('still misses a session that was opened but never actually trained', async () => {
+    // A log with no sets means the session was started and abandoned. That is a
+    // real miss, and crediting it would make the streak meaningless.
+    const client = createFakeSupabase({
+      scheduled_workouts: [row({ id: 'opened', user_plan_id: 'p1' })],
+      workout_logs: [{ id: 'log-1', user_id: USER, scheduled_workout_id: 'opened' }],
+      set_logs: [],
+    })
+    expect(await checkMissedWorkouts(client, USER)).toBe(1)
+    const rows = (await client.from('scheduled_workouts').select('*').eq('user_id', USER)).data
+    expect(rows[0].status).toBe('missed')
+  })
+
+  it('separates trained from untrained in the same sweep', async () => {
+    const client = createFakeSupabase({
+      scheduled_workouts: [
+        row({ id: 'trained', user_plan_id: 'p1' }),
+        row({ id: 'skipped-it', user_plan_id: 'p1' }),
+      ],
+      workout_logs: [{ id: 'log-1', user_id: USER, scheduled_workout_id: 'trained' }],
+      set_logs: [{ id: 's1', workout_log_id: 'log-1' }],
+    })
+    expect(await checkMissedWorkouts(client, USER)).toBe(1)
+
+    const rows = (await client.from('scheduled_workouts').select('*').eq('user_id', USER)).data
+    const byId = Object.fromEntries(rows.map((r: any) => [r.id, r.status]))
+    expect(byId['trained']).toBe('completed')
+    expect(byId['skipped-it']).toBe('missed')
+  })
+
+  it('behaves exactly as before when nothing was logged at all', async () => {
+    const client = createFakeSupabase({
+      scheduled_workouts: [row({ id: 'plain', user_plan_id: 'p1' })],
+      workout_logs: [],
+      set_logs: [],
+    })
+    expect(await checkMissedWorkouts(client, USER)).toBe(1)
+  })
+
   it('never marks a custom/opportunistic session missed — only commitments', async () => {
     const client = createFakeSupabase({
       scheduled_workouts: [row({ id: 'custom-past', source: 'custom' })],

@@ -66,6 +66,7 @@ import { expandEquipment } from '@/lib/equipmentMatch'
 import { useUnitStore, unitLabel, displayWeight, toInputString, inputToLbs, type WeightUnit } from '@/lib/units'
 import type { Exercise, Goal, Experience, Split, TravelMode, MetricKey, WorkoutExerciseConfig, WorkoutSource } from '@/types'
 import { workoutOrigin } from '@/lib/workoutOrigin'
+import { summarizeDay, type DayWorkoutStatus } from '@/lib/dayStatus'
 
 
 const RPE_OPTIONS = [6, 7, 8, 9, 10]
@@ -448,8 +449,17 @@ export default function WorkoutsScreen() {
     const isToday = ds === todayStr
     const inMonth = day.getMonth() === selDate.getMonth()
     const hasWorkout = dayWorkouts.length > 0
-    const allDone = hasWorkout && dayWorkouts.every(w => w.status === 'completed')
-    const anyMissed = hasWorkout && !allDone && dayWorkouts.some(w => w.status === 'missed')
+    // A day reads as trained when something was actually done and nothing is
+    // still pending on it. It used to require EVERY session on the day to be
+    // 'completed', so swapping your plan session for a different one left the
+    // day un-green even though you trained: the abandoned row sits there as
+    // 'missed' next to the completed one and drags the whole day down with it.
+    // (An explicitly removed session is already 'skipped', which
+    // calWorkoutsByDate filters out entirely, so only the missed case was
+    // broken.) Founder, 2026-09-15: "cancel your plan exercise but do a new one
+    // ... it still shows green in plan."
+    const { trained: allDone, missed: anyMissed } =
+      summarizeDay(dayWorkouts.map(w => w.status as DayWorkoutStatus))
 
     return (
       <PressableScale

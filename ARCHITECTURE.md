@@ -2245,12 +2245,39 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   back) at the horizon. `buildBlockContext` now rotates the template array by
   `constraints.rotationOffset` (`rotateTemplates`, exported + unit-tested), so offset 0 is byte-for-byte
   today's behaviour and every existing plan is untouched until the user shifts something.
+  Returns the changed sessions (`ShiftedSession[]`) so the caller can re-point the synced calendar
+  event and the local reminder — **both embed the focus** ("Arclo · Pull", "Pull starts in 30 min"),
+  so without that the calendar keeps announcing a session the user no longer has, the exact
+  disagreement `lib/moveWorkout.ts` exists to prevent. `getPlanRotation` returns null while **travel
+  mode** is active: `travelSchedule` stashes pre-travel exercises in `travel_restore` and writes them
+  back verbatim when travel ends, so a shift would later restore the OLD focus's exercises onto a
+  renamed session (a Push day full of rows), and selection would use home equipment rather than what
+  the user has with them.
   Chosen for scope by evidence: 46 of 48 active-schedule users are on generated plans, only 2 on
   splits, so the split path is deliberately deferred. Never runs in the background — only from an
   explicit user action, because silently rewriting somebody's week on app open is the one behaviour
   this feature must not have. 21 tests (`rotationShiftPlan.test.ts`) lock the re-stamp, date/time
   invariance, focus-correct exercise selection, offset persistence + accumulation, arbitrary
   re-anchor, and the no-op/no-plan/completed-and-missed-untouched/corrupt-delta guards.
+- **Work you did is never "missed" (`lib/missedWorkouts.ts`, 2026-09-15):** the sweep now credits a
+  past `scheduled` session that has **real logged sets** as `completed` instead of `missed`
+  (scheduled_workouts → workout_logs → set_logs; an opened log with zero sets is still a genuine
+  miss). Founder: "if you do some of a workout but don't complete it, it will count as completed when
+  day ends." This is not cosmetic — a mislabelled miss breaks the streak (`streak.ts` keys purely off
+  `status === 'completed'`), drags the Tempo Score down, and feeds `adaptation.refreshAdaptation`,
+  which reads repeated misses as a reason to CUT volume. So the old behaviour actively made training
+  easier for people who had been training all along. Total by construction: any failure in the
+  lookup credits nobody and leaves the sweep exactly as it was, and a failed credit-write leaves the
+  row `scheduled` for the next sweep rather than downgrading it to a miss. Return value still means
+  "rows marked missed". 4 new tests.
+- **`lib/dayStatus.ts` + Plan calendar (2026-09-15):** `summarizeDay(statuses)` replaces the Plan
+  tab's `every(w => w.status === 'completed')` day rule. Founder: "cancel your plan exercise but do
+  a new one ... it still shows green in plan." With two rows on one day — the planned session you
+  abandoned and the one you actually did — `every` is never true, so a day you genuinely trained
+  read as untrained. A day is now **trained** when something is `completed` and nothing is still
+  `scheduled` (a pending session must not be painted as success), and **missed** only when it is not
+  trained. Expressed as what a day MEANS rather than as a list of statuses to ignore, so a future
+  status cannot silently reopen it. 7 tests.
 - **Home missed banner (`app/(tabs)/index.tsx`, 2026-09-14):** the missed-session banner now leads
   with **"Do {focus} next"** when a rotation shift is available, and keeps "Find a new slot" as a
   secondary text action (the two-action shape the conflict banner already uses) so the original

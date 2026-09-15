@@ -1167,10 +1167,19 @@ No dates or times change.`,
           onPress: async () => {
             setShiftingRotation(true)
             try {
-              const changed = await shiftPlanRotation(supabase, userId, delta)
-              if (!changed) {
+              const shifted = await shiftPlanRotation(supabase, userId, delta)
+              if (!shifted.length) {
                 Alert.alert('Could not change your rotation', 'Nothing was changed. Please try again.')
                 return
+              }
+              // Every re-stamped session keeps its date and time, but its NAME
+              // changed — and both the synced calendar event ("Arclo · Pull")
+              // and the 30-minute reminder ("Pull starts in 30 min") embed it.
+              // Re-point them or the calendar keeps announcing a session that
+              // no longer exists. Best-effort, exactly like confirmMoveWorkout:
+              // a calendar hiccup must never undo a shift that already stuck.
+              for (const w of shifted) {
+                resyncMovedWorkout(supabase, userId, w).catch(() => {})
               }
               track('rotation_shifted', { positions: delta, focus })
               queryClient.invalidateQueries({ queryKey: ['scheduled_workouts'] })

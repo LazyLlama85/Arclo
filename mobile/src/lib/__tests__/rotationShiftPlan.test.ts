@@ -122,7 +122,7 @@ describe('shiftPlanRotation', () => {
     const delta = rotationDeltaFor(1, 0, 6)
     const changed = await shiftPlanRotation(client, USER, delta)
 
-    expect(changed).toBeGreaterThan(0)
+    expect(changed.length).toBeGreaterThan(0)
     expect(focusesIn(t)).toEqual(['Push', 'Pull', 'Legs', 'Push', 'Pull'])
   })
 
@@ -175,11 +175,31 @@ describe('shiftPlanRotation', () => {
     expect(focusesIn(t)).toEqual(['Legs', 'Push', 'Pull', 'Legs', 'Push'])
   })
 
+  it('returns each changed session with what the calendar and reminder need', async () => {
+    // The calendar event title and the 30-min reminder both embed the focus, so
+    // a shift that does not re-point them leaves the calendar announcing a
+    // session the user no longer has.
+    const t = tables(['Pull', 'Legs', 'Push', 'Pull', 'Legs'])
+    t.scheduled_workouts[0].calendar_event_id = 'evt-1'
+    t.scheduled_workouts[0].calendar_provider = 'device'
+    const client = createFakeSupabase(t)
+
+    const shifted = await shiftPlanRotation(client, USER, rotationDeltaFor(1, 0, 6))
+
+    const first = shifted.find(w => w.id === 'w0')!
+    expect(first.focus).toBe('Push')                 // the NEW name, not the old
+    expect(first.calendar_event_id).toBe('evt-1')    // so the event can be rebuilt
+    expect(first.calendar_provider).toBe('device')
+    expect(first.planned_date).toBe(t.scheduled_workouts[0].planned_date)
+    expect(first.planned_start_time).toBe('07:00:00')
+    expect(first.planned_duration_min).toBeGreaterThan(0)
+  })
+
   describe('safety', () => {
     it('is a no-op for a zero delta — no writes, no offset change', async () => {
       const t = tables(['Pull', 'Legs', 'Push'])
       const client = createFakeSupabase(t)
-      expect(await shiftPlanRotation(client, USER, 0)).toBe(0)
+      expect(await shiftPlanRotation(client, USER, 0)).toEqual([])
       expect(focusesIn(t)).toEqual(['Pull', 'Legs', 'Push'])
       expect(t.user_plans[0].rotation_offset).toBe(0)
     })
@@ -187,7 +207,7 @@ describe('shiftPlanRotation', () => {
     it('is a no-op for a full-cycle delta', async () => {
       const t = tables(['Pull', 'Legs', 'Push'])
       const client = createFakeSupabase(t)
-      expect(await shiftPlanRotation(client, USER, 6)).toBe(0)
+      expect(await shiftPlanRotation(client, USER, 6)).toEqual([])
       expect(focusesIn(t)).toEqual(['Pull', 'Legs', 'Push'])
     })
 
@@ -210,19 +230,19 @@ describe('shiftPlanRotation', () => {
       const t = tables(['Pull', 'Legs'])
       t.user_plans = []
       const client = createFakeSupabase(t)
-      expect(await shiftPlanRotation(client, USER, 1)).toBe(0)
+      expect(await shiftPlanRotation(client, USER, 1)).toEqual([])
     })
 
     it('returns 0 when nothing is scheduled ahead', async () => {
       const t = tables([])
       const client = createFakeSupabase(t)
-      expect(await shiftPlanRotation(client, USER, 1)).toBe(0)
+      expect(await shiftPlanRotation(client, USER, 1)).toEqual([])
     })
 
     it('ignores a non-finite delta', async () => {
       const t = tables(['Pull', 'Legs', 'Push'])
       const client = createFakeSupabase(t)
-      expect(await shiftPlanRotation(client, USER, NaN)).toBe(0)
+      expect(await shiftPlanRotation(client, USER, NaN)).toEqual([])
       expect(t.user_plans[0].rotation_offset).toBe(0)
     })
   })
@@ -242,6 +262,20 @@ describe('getPlanRotation', () => {
     const client = createFakeSupabase(tables(['Legs', 'Push', 'Pull'], 2))
     const state = await getPlanRotation(client, USER)
     expect(state!.cycle).toEqual(['Legs', 'Push', 'Pull', 'Legs', 'Push', 'Pull'])
+  })
+
+  it('offers nothing while travel mode is active', async () => {
+    // travelSchedule stashes pre-travel exercises in travel_restore and writes
+    // them back verbatim when travel ends. A shift rewrites exercise_ids without
+    // touching that stash, so the restore would later put the OLD focus's
+    // exercises onto a session now named something else.
+    const t = tables(['Pull', 'Legs', 'Push'])
+    t.user_profiles[0].travel_mode = { equipment: ['dumbbells'], until: day(5), label: 'Hotel' }
+    expect(await getPlanRotation(createFakeSupabase(t), USER)).toBeNull()
+
+    // And it comes back once travel has ended.
+    t.user_profiles[0].travel_mode = { equipment: ['dumbbells'], until: day(-1), label: 'Hotel' }
+    expect(await getPlanRotation(createFakeSupabase(t), USER)).not.toBeNull()
   })
 
   it('returns null when there is no plan to rotate', async () => {
