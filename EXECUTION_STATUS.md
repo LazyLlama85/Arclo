@@ -18,6 +18,47 @@
 
 ## ▶ CURRENT FOCUS *(the resume point)*
 
+**2026-09-14 — rotation shift built (plan path), and a live split duplication bug fixed.**
+
+**What shipped (engine + Home wiring, `tsc` clean, 608 tests):**
+- **`lib/rotationShift.ts`** (pure) + **`getPlanRotation` / `shiftPlanRotation`** (`generatePlan.ts`).
+  Founder's six-day-split problem: "if I miss push I want to do it next", and "sometimes I just
+  cancel push and schedule legs because I'm on a different track". One operation — name the
+  position that happens next, everything after follows in cycle order.
+- **Rotates CONTENT along fixed dates, never dates.** A date cascade was designed and rejected: it
+  drags in availability search, calendar teardown/rebuild, reminder re-pointing, the
+  one-session-per-day index and `materializeSplit`. Content rotation touches none of them, and the
+  rest day stays put (a rest day is the absence of a row). Honest tradeoff: the missed session is
+  **not made up** — you stop skipping a muscle group, you don't train an extra day.
+- **`user_plans.rotation_offset`** (`add_plan_rotation_offset.sql`, **APPLIED**). The non-obvious
+  half: re-stamping doesn't change the plan's ROW COUNT and generation picks
+  `templates[sessionCount % len]`, so without a persisted slide the next `extendActivePlan` seams
+  back to the old order at the horizon (two Push days back to back).
+- **Home banner** leads with "Do {focus} next", keeps "Find a new slot" as a secondary action, and
+  — the bigger fix — **widened its eligibility**. It was gated on `!missedRescheduleTight`, which
+  is permanently true on a 6-day split, so **six-day lifters who missed a session saw no banner at
+  all.** The cohort with the sharpest version of the problem was the one the feature excluded.
+
+**Bug found and fixed on the way (independent, was live):** `materializeSplit` keyed idempotency on
+`planned_date`, so ANY mover that changed a date left the origin day looking empty and the next app
+open re-inserted the session that had just been moved. Move Monday's Push to Tuesday, reopen, Monday
+has a Push again. Fixed via **`scheduled_workouts.split_origin_date`** (`add_split_origin_date.sql`,
+**APPLIED**, 124 rows backfilled, 0 inconsistent). Regression test confirmed non-vacuous by reverting
+the fix and watching it fail. Only 2 of 48 active users are on splits, which is why it went unseen.
+
+**Scope decided by evidence, not guesswork:** of users with a schedule in the last 30 days, **46 are
+on generated plans and 2 on splits**. The plan path was wired; the split path is deliberately
+deferred (it additionally needs the split template's weekday mapping rotated, or future
+materialization re-imposes the old order).
+
+**⚠ NOT YET VERIFIED ON A DEVICE, AND NOT YET DELIVERED.** Both migrations are live, but no user has
+this until an OTA ships. The untested path is the one tests cannot cover: the Home banner rendering
+and the confirm dialog firing. **Do that before publishing.**
+
+**⚠ RapidAPI rotation is HALF DONE — see item 1 below. A new key exists; the old one is still live.**
+
+---
+
 **2026-09-09 — health check clean; day-0 activation now instrumented.**
 
 **Verified, not assumed:**
@@ -52,9 +93,13 @@ the data arrives.
    FROM events WHERE event LIKE 'day0_cta%' AND timestamp > now() - INTERVAL 14 DAY
    GROUP BY event, choice, days_until ORDER BY people DESC
    ```
-1. **⚠ FOUNDER: rotate the RapidAPI key.** Prep is done (2026-09-10) — the proxy is live and
-   verified, the key is out of the tree, and media now degrades to a placeholder instead of a
-   blank box if a call fails. Only the rotation itself needs you; I cannot sign into RapidAPI.
+1. **⚠ FOUNDER: finish the RapidAPI rotation — HALF DONE as of 2026-09-13.**
+   A second key **"Arclo edge proxy (2026-09)"** now exists in the RapidAPI dashboard alongside the
+   old leaked "Application Key". Nothing is broken: the old key is still live and serving.
+   **Remaining:** copy the NEW key's value, paste it into Supabase → Edge Functions → Secrets →
+   `RAPIDAPI_KEY`, save, verify with the curls below, and only then delete the old row.
+   Automation could not finish it: the RapidAPI authorization table is in a cross-origin iframe, so
+   the copy button is unreachable, and a clipboard permission prompt froze the tab.
 
    **Preferred order — no downtime.** If RapidAPI lets you hold two keys at once:
    1. Create a NEW key in the RapidAPI dashboard. Leave the old one live.
