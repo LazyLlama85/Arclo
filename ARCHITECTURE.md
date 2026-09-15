@@ -2232,8 +2232,25 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   not "made up" — you still train the days you train, you just stop SKIPPING a muscle group.
   13 tests (`rotationShift.test.ts`) lock the PPLPPLR miss-1 and miss-2 cases, rest-day invariance,
   week wrap, re-anchoring to an arbitrary position, idempotency, and the no-cycle/negative-anchor
-  guards. **Not yet wired to any screen** — the engine and the `split_origin_date` prerequisite
-  landed first.
+  guards. `rotationDeltaFor(nextIndex, targetIndex, len)` converts "make Push next" into the
+  forward slide the stored offset expects (the rotation is cyclic, so back-one is forward-(len-1)).
+  **Not yet wired to any screen.**
+- **Plan-backed rotation shift (`generatePlan.ts`, 2026-09-14):** `getPlanRotation` reads the active
+  plan's cycle + which position the next session holds; `shiftPlanRotation(client, userId, delta)`
+  re-stamps every upcoming session's focus/exercises/duration **and** persists
+  `user_plans.rotation_offset` (migration `add_plan_rotation_offset.sql`, **applied**). The offset is
+  the part that is easy to miss: re-stamping does not change the plan's ROW COUNT, and generation
+  picks templates as `templates[sessionCount % len]`, so without it the next `extendActivePlan`
+  rollover resumes from the ORIGINAL alignment and produces a visible seam (two Push days back to
+  back) at the horizon. `buildBlockContext` now rotates the template array by
+  `constraints.rotationOffset` (`rotateTemplates`, exported + unit-tested), so offset 0 is byte-for-byte
+  today's behaviour and every existing plan is untouched until the user shifts something.
+  Chosen for scope by evidence: 46 of 48 active-schedule users are on generated plans, only 2 on
+  splits, so the split path is deliberately deferred. Never runs in the background — only from an
+  explicit user action, because silently rewriting somebody's week on app open is the one behaviour
+  this feature must not have. 21 tests (`rotationShiftPlan.test.ts`) lock the re-stamp, date/time
+  invariance, focus-correct exercise selection, offset persistence + accumulation, arbitrary
+  re-anchor, and the no-op/no-plan/completed-and-missed-untouched/corrupt-delta guards.
 - **`scheduled_workouts.split_origin_date` (migration `add_split_origin_date.sql`, 2026-09-14):**
   the day a split row was materialized FOR, written once at insert and never rewritten by any mover.
   Fixes a live duplication bug: `materializeSplit` keyed its idempotency on `planned_date` ("does a

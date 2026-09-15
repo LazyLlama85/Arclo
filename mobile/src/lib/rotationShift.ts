@@ -95,6 +95,27 @@ export function planRotationShift(
 }
 
 /**
+ * How many positions to slide so that `targetIndex` becomes the next session,
+ * given that `nextIndex` currently is. Callers think in terms of "make Push
+ * next", not in terms of offsets, and getting this arithmetic wrong by a sign
+ * is the single easiest way to ship a rotation that runs backwards.
+ *
+ * Always returns a value in [0, cycleLength), because the rotation is cyclic:
+ * sliding back one position and forward (cycleLength - 1) are the same move,
+ * and the forward form is the one every caller and the stored offset expect.
+ */
+export function rotationDeltaFor(
+  nextIndex: number,
+  targetIndex: number,
+  cycleLength: number,
+): number {
+  if (!Number.isFinite(cycleLength) || cycleLength <= 0) return 0
+  if (!Number.isFinite(nextIndex) || !Number.isFinite(targetIndex)) return 0
+  const len = Math.floor(cycleLength)
+  return (((Math.floor(targetIndex) - Math.floor(nextIndex)) % len) + len) % len
+}
+
+/**
  * True when a shift would visibly change anything. Lets a caller avoid showing
  * a confirmation sheet, writing rows, or logging an adaptation event for a
  * no-op — which happens more often than it sounds, e.g. missing the LAST

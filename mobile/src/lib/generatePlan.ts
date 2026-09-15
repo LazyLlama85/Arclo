@@ -59,6 +59,21 @@ interface PlanConstraints {
    *  availability is — so EVERY generation path gets familiarity-aware selection
    *  and no caller can forget to pass it. */
   familiarity: FamiliarityIndex
+  /** How many positions the plan's rotation has been slid (user_plans.rotation_offset).
+   *  Rotates the template array so every generated block continues in the shifted
+   *  order — see add_plan_rotation_offset.sql. Absent/0 is today's behaviour
+   *  exactly, which is why initial generation never passes it. */
+  rotationOffset?: number
+}
+
+/** Rotate a template list left by `offset`, normalised into range. Separate and
+ *  total so a corrupt/negative stored offset can never throw or produce holes. */
+export function rotateTemplates<T>(list: T[], offset: number): T[] {
+  if (list.length === 0) return list
+  if (!Number.isFinite(offset)) return list
+  const n = ((Math.floor(offset) % list.length) + list.length) % list.length
+  if (n === 0) return list
+  return [...list.slice(n), ...list.slice(0, n)]
 }
 
 async function fetchPlanConstraints(client: SupabaseClient, userId: string): Promise<PlanConstraints> {
@@ -809,7 +824,13 @@ async function buildBlockContext(
     slots: chooseDaySlots(days, constraints.blockedWeekdays),
     blockedWeekdays: constraints.blockedWeekdays,
     familiarity: constraints.familiarity,
-    templates: buildSessionTemplates(profile.goal, days, profile.include_cardio),
+    // Rotated by the plan's persisted rotation_offset so a shifted rotation
+    // survives the next block instead of snapping back at the horizon (see
+    // add_plan_rotation_offset.sql). Offset 0 leaves the array identical.
+    templates: rotateTemplates(
+      buildSessionTemplates(profile.goal, days, profile.include_cardio),
+      constraints.rotationOffset ?? 0,
+    ),
     bySlot,
     // How many exercises fit the user's preferred session length FOR THIS GOAL —
     // a strength day (full 3-min rests) fits fewer lifts than a fat-loss circuit
@@ -939,7 +960,7 @@ export async function extendActivePlan(client: SupabaseClient, userId: string): 
   try {
     const { data: plan } = await client
       .from('user_plans')
-      .select('id, start_date, adaptation_mode')
+      .select('id, start_date, adaptation_mode, rotation_offset')
       .eq('user_id', userId)
       .eq('status', 'active')
       .order('created_at', { ascending: false })
@@ -996,7 +1017,12 @@ export async function extendActivePlan(client: SupabaseClient, userId: string): 
       school_end: (p.school_end ?? null) as string | null,
     }
     const constraints = await fetchPlanConstraints(client, userId)
-    const ctx = await buildBlockContext(client, profile, constraints)
+    // The plan's persisted rotation slide, so a re-stamp and the next generated
+    // block agree on which template a given position carries.
+    const ctx = await buildBlockContext(client, profile, {
+      ...constraints,
+      rotationOffset: (plan.rotation_offset as number | null) ?? 0,
+    })
 
     // Continue the exercise/start-time rotation where the plan left off.
     const { count } = await client
@@ -1072,7 +1098,7 @@ export async function restampFuturePlanForExperience(
   try {
     const { data: plan } = await client
       .from('user_plans')
-      .select('id, adaptation_mode')
+      .select('id, adaptation_mode, rotation_offset')
       .eq('user_id', userId)
       .eq('status', 'active')
       .order('created_at', { ascending: false })
@@ -1103,7 +1129,12 @@ export async function restampFuturePlanForExperience(
       include_cardio: !!p.include_cardio,
     }
     const constraints = await fetchPlanConstraints(client, userId)
-    const ctx = await buildBlockContext(client, profile, constraints)
+    // The plan's persisted rotation slide, so a re-stamp and the next generated
+    // block agree on which template a given position carries.
+    const ctx = await buildBlockContext(client, profile, {
+      ...constraints,
+      rotationOffset: (plan.rotation_offset as number | null) ?? 0,
+    })
     const mode = (plan.adaptation_mode ?? 'normal') as AdaptationMode
 
     // Map each session's focus back to its template so re-selection stays true to
@@ -1179,5 +1210,254 @@ export async function restampFuturePlanForExperience(
     return changed
   } catch {
     return 0 // never break the celebration / app open on a re-stamp hiccup
+  }
+}
+
+// ── Rotation shift — "I missed push, I want push next" ───────────────────────
+//
+// Founder, 2026-09-14, on his own six-day plan: "if I miss a day then I will
+// want to hit it, if I miss push I want to do it next", and "sometimes I will
+// just cancel push and schedule legs because I'm on a different track".
+//
+// Both are one operation: slide the rotation so a chosen position happens next.
+// The pure sequencing lives in `lib/rotationShift.ts`; this is the plan-backed
+// half — it re-stamps the already-scheduled future sessions AND persists the
+// slide on the plan so the next generated block continues in the new order
+// rather than seaming back to the old one at the horizon.
+//
+// Deliberately rotates CONTENT along the existing dates. Nothing here touches
+// planned_date or planned_start_time, so synced calendar events, local
+// reminders, the one-session-per-day index and the whole availability/free-slot
+// machinery are all untouched. A rest day is the absence of a row, so it stays
+// exactly where the user put it.
+
+export interface PlanRotationState {
+  planId: string
+  /** Focus labels in the plan's CURRENT order, e.g. Push/Pull/Legs/Push/Pull/Legs. */
+  cycle: string[]
+  /** Upcoming, not-yet-done sessions in date order. */
+  upcoming: { id: string; focus: string; date: string }[]
+  /** Which cycle position the first upcoming session currently holds. */
+  nextIndex: number
+}
+
+// A focus can appear twice in one cycle (a 6-day muscle plan is PPL twice), so
+// indexOf is ambiguous between position 0 and position 3. That ambiguity is
+// harmless here and resolving it would need state we do not store: the two
+// entries ARE the same template, so anchoring on either produces an identical
+// downstream sequence. The only difference is the per-focus exercise rotation
+// index, which is seeded from history further down regardless.
+function indexOfFocus(cycle: string[], focus: string): number {
+  const i = cycle.indexOf(stripDeloadFocus(focus))
+  return i < 0 ? 0 : i
+}
+
+/** Read the plan's rotation as it stands. Null when there is nothing to shift. */
+export async function getPlanRotation(
+  client: SupabaseClient,
+  userId: string,
+): Promise<PlanRotationState | null> {
+  try {
+    const { data: plan } = await client
+      .from('user_plans')
+      .select('id, rotation_offset')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (!plan) return null
+
+    const { data: p } = await client
+      .from('user_profiles')
+      .select('goal, days_per_week, include_cardio')
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (!p) return null
+
+    const cycle = rotateTemplates(
+      buildSessionTemplates(
+        (p.goal ?? 'general_fitness') as Goal,
+        (p.days_per_week as number) ?? 3,
+        !!p.include_cardio,
+      ),
+      (plan.rotation_offset as number | null) ?? 0,
+    ).map(t => t.focus)
+    if (cycle.length < 2) return null // a 1-session cycle cannot be rotated
+
+    const todayStr = formatDate(new Date())
+    const { data: future } = await client
+      .from('scheduled_workouts')
+      .select('id, focus, planned_date')
+      .eq('user_id', userId)
+      .eq('user_plan_id', plan.id)
+      .eq('source', 'plan')
+      .eq('status', 'scheduled')
+      .gte('planned_date', todayStr)
+      .order('planned_date', { ascending: true })
+      .order('planned_start_time', { ascending: true })
+
+    const upcoming = ((future ?? []) as any[]).map(r => ({
+      id: r.id as string, focus: r.focus as string, date: r.planned_date as string,
+    }))
+    if (!upcoming.length) return null
+
+    return {
+      planId: plan.id as string,
+      cycle,
+      upcoming,
+      nextIndex: indexOfFocus(cycle, upcoming[0].focus),
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Slide the rotation by `delta` positions and re-stamp every upcoming session.
+ * Returns how many sessions actually changed (0 on any failure, or when the
+ * shift is a no-op — e.g. missing the last session of a cycle, where the
+ * rotation already continues correctly).
+ *
+ * Only ever called from an explicit user action. Nothing in the app applies a
+ * rotation shift in the background: silently rewriting somebody's week on app
+ * open is precisely the behaviour this feature must not have.
+ */
+export async function shiftPlanRotation(
+  client: SupabaseClient,
+  userId: string,
+  delta: number,
+): Promise<number> {
+  try {
+    if (!Number.isFinite(delta)) return 0
+
+    const { data: plan } = await client
+      .from('user_plans')
+      .select('id, adaptation_mode, rotation_offset')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (!plan) return 0
+
+    const { data: p } = await client
+      .from('user_profiles')
+      .select('goal, experience, equipment, days_per_week, preferred_duration_min, preferred_time_of_day, include_cardio, wake_time, bedtime, work_start, work_end, school_start, school_end')
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (!p) return 0
+
+    const profile: PlanProfile = {
+      goal: (p.goal ?? 'general_fitness') as Goal,
+      experience: (p.experience ?? 'beginner') as Experience,
+      equipment: (p.equipment ?? []) as string[],
+      days_per_week: (p.days_per_week as number) ?? 3,
+      preferred_duration_min: (p.preferred_duration_min as number) ?? 45,
+      preferred_time_of_day: (p.preferred_time_of_day ?? null) as TimeOfDay | null,
+      wake_time: (p.wake_time ?? null) as string | null,
+      bedtime: (p.bedtime ?? null) as string | null,
+      work_start: (p.work_start ?? null) as string | null,
+      work_end: (p.work_end ?? null) as string | null,
+      school_start: (p.school_start ?? null) as string | null,
+      school_end: (p.school_end ?? null) as string | null,
+      include_cardio: !!p.include_cardio,
+    }
+
+    // The UNROTATED cycle: anchoring is computed in base-template space so the
+    // stored offset and the re-stamped rows cannot drift apart.
+    const base = buildSessionTemplates(profile.goal, profile.days_per_week, profile.include_cardio)
+    const len = base.length
+    if (len < 2) return 0
+
+    const oldOffset = (plan.rotation_offset as number | null) ?? 0
+    const step = ((Math.floor(delta) % len) + len) % len
+    if (step === 0) return 0
+
+    const todayStr = formatDate(new Date())
+    const { data: future } = await client
+      .from('scheduled_workouts')
+      .select('id, focus, week_index')
+      .eq('user_id', userId)
+      .eq('user_plan_id', plan.id)
+      .eq('source', 'plan')
+      .eq('status', 'scheduled')
+      .gte('planned_date', todayStr)
+      .order('planned_date', { ascending: true })
+      .order('planned_start_time', { ascending: true })
+    if (!future?.length) return 0
+
+    const rotatedOld = rotateTemplates(base, oldOffset).map(t => t.focus)
+    const anchor = (indexOfFocus(rotatedOld, (future[0] as any).focus as string) + oldOffset + step) % len
+    const newOffset = (((oldOffset + step) % len) + len) % len
+
+    // Persist the slide FIRST. If the re-stamp loop then fails part-way, the
+    // plan and every future block still agree on the new order, and the next
+    // app open's own re-stamp paths converge on it — the opposite ordering
+    // would leave rows in a new order that generation keeps undoing.
+    const { error: offsetErr } = await client
+      .from('user_plans')
+      .update({ rotation_offset: newOffset })
+      .eq('id', plan.id)
+      .eq('user_id', userId)
+    if (offsetErr) return 0
+
+    const constraints = await fetchPlanConstraints(client, userId)
+    const ctx = await buildBlockContext(client, profile, { ...constraints, rotationOffset: newOffset })
+    const mode = (plan.adaptation_mode ?? 'normal') as AdaptationMode
+
+    // Seed each focus's exercise-rotation index from how much of that focus has
+    // already run, so a shift keeps varying rather than resetting everyone to
+    // the top of the pool (same rule as the experience re-stamp).
+    const { count: prior } = await client
+      .from('scheduled_workouts')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('user_plan_id', plan.id)
+      .eq('source', 'plan')
+      .lt('planned_date', todayStr)
+    const priorRot = Math.floor((prior ?? 0) / len)
+    const focusRotation = new Map<string, number>()
+
+    let changed = 0
+    const failedIds: string[] = []
+    for (let i = 0; i < future.length; i++) {
+      const w = future[i] as any
+      const template = base[(anchor + i) % len]
+      const baseFocus = template.focus
+      // Already carrying the right session — no write, no churn.
+      if (stripDeloadFocus(w.focus as string) === baseFocus) continue
+
+      const rot = focusRotation.get(baseFocus) ?? priorRot
+      focusRotation.set(baseFocus, rot + 1)
+      const exerciseIds = selectForSlots(ctx.bySlot, template, rot, ctx.targetCount, ctx.familiarity)
+      // An empty selection would blank the session. Leave the row exactly as it
+      // was rather than hand the user an empty workout.
+      if (!exerciseIds.length) continue
+
+      const weekIndex = (w.week_index as number | null) ?? 0
+      const progression = weekProgression(weekIndex, profile.experience, mode)
+      const { error } = await client
+        .from('scheduled_workouts')
+        .update({
+          focus: progression.isDeload ? `${baseFocus} (Deload)` : baseFocus,
+          exercise_ids: exerciseIds,
+          progression,
+          planned_duration_min: estimateSessionMinutes(exerciseIds.length, profile.goal, progression.isDeload),
+        })
+        .eq('id', w.id)
+        .eq('user_id', userId)
+      if (error) { failedIds.push(w.id as string); continue }
+      changed++
+    }
+
+    if (failedIds.length) {
+      captureApiError('shiftPlanRotation', new Error('partial rotation shift failure'), {
+        userId, failedCount: failedIds.length, totalCount: future.length, failedIds,
+      })
+    }
+    return changed
+  } catch {
+    return 0
   }
 }

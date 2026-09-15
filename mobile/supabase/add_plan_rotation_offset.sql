@@ -1,0 +1,25 @@
+-- Arclo — let a plan's rotation be shifted without the next block undoing it.
+--
+-- generatePlan picks each session's template positionally:
+--
+--     template = templates[sessionCount % templates.length]
+--
+-- where sessionCount is seeded from how many rows the plan already has. That is
+-- what makes a 6-day muscle plan run Push/Pull/Legs/Push/Pull/Legs forever.
+--
+-- Founder, 2026-09-14: "if I miss push I want to do it next", and "sometimes I
+-- will just cancel push and schedule legs because I'm on a different track".
+-- Both mean the rotation should slide by some number of positions.
+--
+-- Re-stamping the already-scheduled rows is not enough on its own. Re-stamping
+-- does not change the ROW COUNT, so the next rollover (extendActivePlan, which
+-- fires when the plan is within PLAN_RUNWAY_DAYS of running dry) would resume
+-- from the ORIGINAL alignment and produce a visible seam at the horizon — two
+-- Push days back to back where the old and new orders meet.
+--
+-- rotation_offset is that slide, persisted. buildBlockContext rotates the
+-- template array by it, so every future block continues in the shifted order
+-- and the seam cannot occur. Default 0 is exactly today's behaviour, so every
+-- existing plan is untouched until the user actually shifts something.
+alter table public.user_plans
+  add column if not exists rotation_offset int not null default 0;
