@@ -2214,6 +2214,36 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   correspond: `applySplitPreset` fills a split's week **and** saves each of its workouts into the
   user's `workout_templates` library. Surfaced as "Start from a template" in the workout-builder
   (`?presetId`) and split-editor, and as Templates in `AddWorkoutSheet`.
+- **Rotation shift (`lib/rotationShift.ts`, 2026-09-14):** the founder's six-day-split problem —
+  "if I miss push I want to do it next", and "sometimes I will just cancel push and schedule legs
+  because I'm on a different track". Both are one operation: name the rotation position that
+  happens next, and everything after follows in cycle order. `planRotationShift(slots, cycleLength,
+  anchorIndex)` re-stamps which cycle position each UPCOMING session holds; `shiftChangesAnything`
+  lets a caller skip the sheet/writes for a no-op (missing the last slot of a cycle already
+  continues correctly). Pure and I/O-free — the caller maps a cycle position back to real exercises
+  (split day config / plan template) and writes the rows.
+  **Deliberately rotates CONTENT, not dates.** The first design was a date cascade (push the miss to
+  tomorrow, absorb the overflow into a rest day); it was rejected because moving dates drags in
+  availability + free-slot search, calendar event teardown/rebuild, reminder re-pointing, the
+  one-session-per-day partial unique index, and `materializeSplit`'s day coverage — six load-bearing
+  systems, to express something the user described purely as content. Rotating content leaves every
+  date, time, calendar event and reminder untouched, and the rest day stays put because a rest day
+  is the ABSENCE of a row and so is never an input. Tradeoff, stated honestly: the missed session is
+  not "made up" — you still train the days you train, you just stop SKIPPING a muscle group.
+  13 tests (`rotationShift.test.ts`) lock the PPLPPLR miss-1 and miss-2 cases, rest-day invariance,
+  week wrap, re-anchoring to an arbitrary position, idempotency, and the no-cycle/negative-anchor
+  guards. **Not yet wired to any screen** — the engine and the `split_origin_date` prerequisite
+  landed first.
+- **`scheduled_workouts.split_origin_date` (migration `add_split_origin_date.sql`, 2026-09-14):**
+  the day a split row was materialized FOR, written once at insert and never rewritten by any mover.
+  Fixes a live duplication bug: `materializeSplit` keyed its idempotency on `planned_date` ("does a
+  row sit on this date"), so ANY mover that changes `planned_date` — missed-workout reschedule,
+  reschedule/delay my week, the hourly server-side `retime-sessions`, a manual edit — left the origin
+  day looking empty and the next app open re-inserted the session that had just been moved. Move
+  Monday's Push to Tuesday, reopen, and Monday has a Push again. Coverage is now keyed on origin, the
+  read window is padded ±14 days (a moved row can sit outside its origin's window), and rows
+  predating the migration fall back to `planned_date` (exactly what the backfill set). Verified by
+  reverting the key and confirming the regression test fails.
 - **Recovery & context:** `recovery` (readiness check-ins), `trainingLoad` (rest-day advice),
   `missedWorkouts`, `substitutions` (saved exercise swaps, ranked by curated match → muscle overlap
   → popularity), `travelMode` (the equipment-override record + summaries), **`travelSchedule`**

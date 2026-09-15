@@ -121,21 +121,39 @@ export async function materializeSplit(
   const hasWork = [...byWeekday.values()].some((d) => !d.rest && (d.exercise_ids?.length ?? 0) > 0)
   if (!hasWork) return 0
 
-  // Dates this split already owns in the horizon → skip (idempotent re-runs).
+  // Split days this split already owns in the horizon → skip (idempotent re-runs).
   // A 'skipped' row (the user removed just that one day) is deliberately NOT
   // "taken" — it reads as open again so this fill naturally re-adds it on the
   // next run, instead of leaving a manually-removed day permanently empty.
   // 'rescheduled' rows (superseded by a plan/split change or a dedupe pass)
   // stay excluded — those really are gone, not just a single skipped day.
+  //
+  // Coverage is keyed on split_origin_date (the day the row was materialized
+  // FOR) rather than planned_date (where it currently sits). Keying on the
+  // current position was a real duplication bug: any mover that changes
+  // planned_date — the missed-workout reschedule, "reschedule my whole week",
+  // "delay my week", the hourly server-side retime-sessions, a manual edit —
+  // left the origin day looking empty, so the next app open re-inserted the
+  // session it had just moved. See add_split_origin_date.sql.
+  //
+  // The read window is widened either side of the horizon because a MOVED row
+  // can sit outside the window its origin belongs to; without the padding a
+  // session shifted across the boundary would look uncovered again. Rows
+  // predating the migration fall back to planned_date, which is exactly what
+  // the backfill set them to.
+  const readFrom = new Date(today); readFrom.setDate(today.getDate() - 14)
+  const readTo = new Date(horizonEnd); readTo.setDate(horizonEnd.getDate() + 14)
   const { data: existing } = await client
     .from('scheduled_workouts')
-    .select('planned_date')
+    .select('planned_date, split_origin_date')
     .eq('user_id', userId)
     .eq('split_id', split.id)
     .neq('status', 'skipped')
-    .gte('planned_date', toDateStr(today))
-    .lte('planned_date', toDateStr(horizonEnd))
-  const taken = new Set((existing ?? []).map((r: any) => r.planned_date as string))
+    .gte('planned_date', toDateStr(readFrom))
+    .lte('planned_date', toDateStr(readTo))
+  const taken = new Set(
+    (existing ?? []).map((r: any) => (r.split_origin_date as string | null) ?? (r.planned_date as string)),
+  )
 
   const tod = preferredTimeOfDay ?? 'morning'
   const times = START_TIMES[tod]
@@ -163,6 +181,11 @@ export async function materializeSplit(
       user_plan_id: null,
       split_id: split.id,
       planned_date: dateStr,
+      // The day this session was materialized FOR. Written once here and never
+      // rewritten — movers only ever change planned_date — so this stays the
+      // stable identity of "which split day is this", which is what keeps
+      // re-runs idempotent after a session has been moved.
+      split_origin_date: dateStr,
       planned_start_time: startTime,
       planned_duration_min: durationMin,
       focus: day.label || 'Workout',

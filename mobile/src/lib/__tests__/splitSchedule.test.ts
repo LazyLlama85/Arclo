@@ -98,6 +98,64 @@ describe('materializeSplit', () => {
     expect(allRows.length).toBeGreaterThan(0)
   })
 
+  // ── split_origin_date: a MOVED session is still "covered" ────────────────
+  //
+  // The bug: coverage used to be keyed on planned_date, i.e. "does some row sit
+  // on this date". Every mover in the app changes planned_date (missed-workout
+  // reschedule, reschedule/delay my week, the hourly server-side retime, a
+  // manual edit), which left the origin day looking empty — so the next app
+  // open cheerfully re-inserted the very session that had just been moved.
+  // Symptom: move Monday's Push to Tuesday, reopen the app, and Monday has a
+  // Push again. The move reads as undone and the week is over-scheduled.
+  it('does not re-create a session that was MOVED off its origin day', async () => {
+    const client = createFakeSupabase({
+      scheduled_workouts: [
+        // Materialized for Monday, since moved to Tuesday. Origin stays Monday.
+        workoutRow({
+          id: 'moved', split_id: 'split-1',
+          planned_date: '2026-07-21', split_origin_date: TODAY,
+        }),
+      ],
+    })
+    await materializeSplit(client, USER, split(), 'morning')
+
+    const mondayRows = (await client.from('scheduled_workouts').select('*')
+      .eq('user_id', USER).eq('planned_date', TODAY)).data
+    expect(mondayRows).toHaveLength(0)
+
+    // Exactly one row still descends from Monday — the one we moved.
+    const fromMonday = (await client.from('scheduled_workouts').select('*')
+      .eq('user_id', USER).eq('split_origin_date', TODAY)).data
+    expect(fromMonday).toHaveLength(1)
+    expect(fromMonday[0].id).toBe('moved')
+  })
+
+  it('stamps split_origin_date on every row it creates', async () => {
+    const client = createFakeSupabase({ scheduled_workouts: [] })
+    await materializeSplit(client, USER, split(), 'morning')
+    const rows = (await client.from('scheduled_workouts').select('*').eq('user_id', USER)).data
+    expect(rows.length).toBeGreaterThan(0)
+    // Written once, equal to the day it was materialized for.
+    expect(rows.every((r: any) => r.split_origin_date === r.planned_date)).toBe(true)
+  })
+
+  it('falls back to planned_date for rows predating the migration', async () => {
+    // Backfill sets split_origin_date = planned_date, but a row written by an
+    // older client between migration and app update can still be null. Such a
+    // row must still count as covering the day it sits on, or the duplication
+    // bug reopens for exactly those users.
+    const client = createFakeSupabase({
+      scheduled_workouts: [
+        workoutRow({ id: 'legacy', split_id: 'split-1', planned_date: TODAY, split_origin_date: null }),
+      ],
+    })
+    await materializeSplit(client, USER, split(), 'morning')
+    const rows = (await client.from('scheduled_workouts').select('*')
+      .eq('user_id', USER).eq('planned_date', TODAY)).data
+    expect(rows).toHaveLength(1)
+    expect(rows[0].id).toBe('legacy')
+  })
+
   it('never materializes the auto-plan mirror (that would duplicate plan-owned sessions)', async () => {
     const client = createFakeSupabase({ scheduled_workouts: [] })
     const n = await materializeSplit(client, USER, split({ kind: 'auto' }), 'morning')
