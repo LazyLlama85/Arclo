@@ -2259,6 +2259,15 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   this feature must not have. 21 tests (`rotationShiftPlan.test.ts`) lock the re-stamp, date/time
   invariance, focus-correct exercise selection, offset persistence + accumulation, arbitrary
   re-anchor, and the no-op/no-plan/completed-and-missed-untouched/corrupt-delta guards.
+- **Exercise pictograms (`brand-assets/exercise_art.py`, 2026-09-15):** flat vector exercise
+  graphics drawn in code (13 of them, plus a contact sheet for reviewing the set together). Founder
+  asked for cartoon graphics rather than live people; Higgsfield had 0.8 credits on a free plan, so
+  AI generation was not available without a purchase, and it was the wrong tool anyway — image models
+  get bar path, grip width, joint angles and plate counts wrong in ways a fitness audience spots
+  instantly. Drawn means one consistent style, exact brand colours, no licensing risk, and a fix is
+  one line. `draw_exercise` trims each pose to its own bounding box and re-centres it, without which
+  every icon keeps whatever slice of the grid it was drawn in and the set lands at wildly different
+  visual weights.
 - **TikTok slideshow assets (`brand-assets/make-slides.py` → `brand-assets/slides/`, 2026-09-15):**
   renders all 49 slides of the five faceless slideshow series as finished 1080x1920 PNGs, from the
   app's own palette and Inter weights. Generated rather than sourced for a mechanical reason: TikTok
@@ -2269,7 +2278,13 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   training brand costs more credibility than the slide is worth). **Exercises are typographic cards;
   the only photographs are the real screenshots in `web/img/shots/`**, composited into a drawn
   bezel, never a mockup. `SAFE_BOTTOM = 1500` keeps every call to action clear of TikTok's caption
-  and action-rail overlay. Playbook (copy, hooks, posting order):
+  and action-rail overlay. **Every slide carries a pictogram and at least one row of real
+  information** (muscles / sets / cue), after the founder's note that the first version was "mostly
+  empty with some little text" — a viewer swiping at two seconds a slide has to collect something on
+  each one. Series 01 was rewritten on his coaching correction: **train tomorrow as planned and add a
+  ten-minute make-up**, rather than sliding the rotation, because sliding reorders the week but never
+  recovers the missed session. Its CTA points at Quick Workout, which exists, and deliberately does
+  not claim the app trims "the session you missed", which is not built. Playbook (copy, hooks, posting order):
   `https://claude.ai/code/artifact/f68a35ae-6a98-45b5-a9fa-4cf8822cea75`.
 - **Tempo Score counts DAYS, not sessions (`lib/tempoScore.ts` + `friends_leaderboard_v2`,
   migration `fix_tempo_score_day_level.sql`, **applied**, 2026-09-15):** founder, on his own 287 —
