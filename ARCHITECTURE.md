@@ -2259,6 +2259,24 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   this feature must not have. 21 tests (`rotationShiftPlan.test.ts`) lock the re-stamp, date/time
   invariance, focus-correct exercise selection, offset persistence + accumulation, arbitrary
   re-anchor, and the no-op/no-plan/completed-and-missed-untouched/corrupt-delta guards.
+- **Tempo Score counts DAYS, not sessions (`lib/tempoScore.ts` + `friends_leaderboard_v2`,
+  migration `fix_tempo_score_day_level.sql`, **applied**, 2026-09-15):** founder, on his own 287 —
+  "sometimes I skip my planned workout to schedule the one I wanna do, my score shouldn't be
+  punished for this." His data: **36 sessions came due over only 26 distinct days**. A plan
+  schedules more sessions than there are training days, because a swapped-in session sits alongside
+  the one it replaced — so counting SESSIONS charged him twice for one decision (the abandoned
+  session scored a miss AND the workout he did scored a completion), and choosing his own session
+  actively lowered his score. `TempoScoreInput.dueSessions/completedSessions` are now
+  `dueDays/trainedDays`: a day is due if a commitment on it came due, and trained if anything on it
+  was completed. `weeksMetGoal` counts distinct days too, so an AM/PM split no longer double-counts
+  toward a goal expressed in days. Same principle as [`lib/dayStatus.ts`]. **Client and RPC must
+  agree** or a user's own score disagrees with the one their friends see, so `due_28`/`completed_28`
+  became `count(distinct planned_date)` in the same pass. The anti-gaming mission rule survives and
+  is re-tested at day level: piling sessions onto days you do not train cannot raise a day ratio.
+  For the founder this moved completion 0.333 → 0.462. 4 new tests.
+- **Repair (2026-09-15):** 2 rows across 2 users were `missed` despite having logged sets (the
+  pre-fix sweep), promoted to `completed`. Small because the sweep fix landed quickly — the score
+  complaint was overwhelmingly the session-vs-day counting above, not lost sessions.
 - **Journey harness (`lib/__tests__/harness/world.ts` + `journeys.test.ts`, 2026-09-15):** a
   simulated user the real modules run against — seeded profile/plan/exercises/schedule, a clock you
   can advance, `openApp()` running the real dedupe → missed-sweep → rollover chain, plus

@@ -14,16 +14,16 @@ describe('computeTempoScore', () => {
   it('MISSION: a consistent beginner out-scores a flaky advanced lifter', () => {
     // Beginner: 3-day goal, completes 3/3 every week for 4 weeks, 12-session streak.
     const beginner = computeTempoScore({
-      dueSessions: 12,
-      completedSessions: 12,
+      dueDays: 12,
+      trainedDays: 12,
       weeksMetGoal: 4,
       currentStreak: 12,
       goalPerWeek: 3,
     })
     // Advanced: 5-day goal, only 8/20 completed, bursty, streak broken.
     const advanced = computeTempoScore({
-      dueSessions: 20,
-      completedSessions: 8,
+      dueDays: 20,
+      trainedDays: 8,
       weeksMetGoal: 1,
       currentStreak: 1,
       goalPerWeek: 5,
@@ -34,22 +34,22 @@ describe('computeTempoScore', () => {
   })
 
   it('is bounded 0–1000', () => {
-    const zero = computeTempoScore({ dueSessions: 0, completedSessions: 0, weeksMetGoal: 0, currentStreak: 0, goalPerWeek: 3 })
+    const zero = computeTempoScore({ dueDays: 0, trainedDays: 0, weeksMetGoal: 0, currentStreak: 0, goalPerWeek: 3 })
     expect(zero.score).toBe(0)
-    const maxed = computeTempoScore({ dueSessions: 30, completedSessions: 30, weeksMetGoal: 4, currentStreak: 100, goalPerWeek: 3 })
+    const maxed = computeTempoScore({ dueDays: 30, trainedDays: 30, weeksMetGoal: 4, currentStreak: 100, goalPerWeek: 3 })
     expect(maxed.score).toBeLessThanOrEqual(1000)
     expect(maxed.score).toBeGreaterThan(950)
   })
 
   it('cannot be gamed by over-scheduling workouts you do not complete', () => {
     // Same completed work; one person padded their schedule with skips/misses.
-    const honest = computeTempoScore({ dueSessions: 12, completedSessions: 12, weeksMetGoal: 4, currentStreak: 12, goalPerWeek: 3 })
-    const padder = computeTempoScore({ dueSessions: 40, completedSessions: 12, weeksMetGoal: 4, currentStreak: 12, goalPerWeek: 3 })
+    const honest = computeTempoScore({ dueDays: 12, trainedDays: 12, weeksMetGoal: 4, currentStreak: 12, goalPerWeek: 3 })
+    const padder = computeTempoScore({ dueDays: 40, trainedDays: 12, weeksMetGoal: 4, currentStreak: 12, goalPerWeek: 3 })
     expect(padder.score).toBeLessThan(honest.score) // completion term punishes the padding
   })
 
   it('completion component = completed ÷ due', () => {
-    const r = computeTempoScore({ dueSessions: 10, completedSessions: 7, weeksMetGoal: 2, currentStreak: 3, goalPerWeek: 4 })
+    const r = computeTempoScore({ dueDays: 10, trainedDays: 7, weeksMetGoal: 2, currentStreak: 3, goalPerWeek: 4 })
     expect(r.components.completion).toBeCloseTo(0.7, 6)
   })
 })
@@ -66,8 +66,8 @@ describe('tempoScoreInputFromSessions', () => {
       mk('2026-07-20', 'scheduled'), // future — must be ignored
     ]
     const input = tempoScoreInputFromSessions(sessions, 3, today)
-    expect(input.dueSessions).toBe(3) // 2 completed + 1 missed; future scheduled excluded
-    expect(input.completedSessions).toBe(2)
+    expect(input.dueDays).toBe(3) // 2 completed + 1 missed; future scheduled excluded
+    expect(input.trainedDays).toBe(2)
   })
 
   it('ignores sessions outside the 28-day window', () => {
@@ -76,8 +76,8 @@ describe('tempoScoreInputFromSessions', () => {
       mk('2026-05-01', 'completed'), // >28 days ago
     ]
     const input = tempoScoreInputFromSessions(sessions, 3, today)
-    expect(input.dueSessions).toBe(1)
-    expect(input.completedSessions).toBe(1)
+    expect(input.dueDays).toBe(1)
+    expect(input.trainedDays).toBe(1)
   })
 
   it('a perfect 4-week beginner derives a top-tier score', () => {
@@ -99,3 +99,61 @@ function offset(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T00:00:00Z`)
   return new Date(d.getTime() + days * 86_400_000).toISOString().slice(0, 10)
 }
+
+// ── Days, not sessions ───────────────────────────────────────────────────────
+//
+// Founder, 2026-09-15, on his own score of 287: "I don't make my full goal of 6
+// workouts but I get about 4, sometimes I skip my planned workout to schedule
+// the one I wanna do, my score shouldn't be punished for this."
+//
+// His real data: 36 sessions came due over 28 days, but only 26 distinct days
+// carried one. Counting SESSIONS charged him twice for a single decision — the
+// session he abandoned scored a miss AND the one he did scored a completion —
+// so swapping in the workout he wanted actively lowered his score.
+describe('swapping one session for another is one day, trained', () => {
+  const today = '2026-09-15'
+  const row = (planned_date: string, status: string, id = `${planned_date}-${status}`) =>
+    ({ id, planned_date, status, source: 'plan' }) as never
+
+  it('does not charge a miss for the session you replaced', () => {
+    // One day. Planned session abandoned, own session done instead.
+    const input = tempoScoreInputFromSessions(
+      [row('2026-09-14', 'missed'), row('2026-09-14', 'completed')], 6, today,
+    )
+    expect(input.dueDays).toBe(1)
+    expect(input.trainedDays).toBe(1)
+    expect(computeTempoScore(input).components.completion).toBe(1)
+  })
+
+  it('a day you genuinely did nothing still counts against you', () => {
+    const input = tempoScoreInputFromSessions(
+      [row('2026-09-14', 'missed'), row('2026-09-13', 'completed')], 6, today,
+    )
+    expect(input.dueDays).toBe(2)
+    expect(input.trainedDays).toBe(1)
+    expect(computeTempoScore(input).components.completion).toBe(0.5)
+  })
+
+  it('two sessions in one day is one day, not two', () => {
+    // Otherwise an AM/PM split double-counts toward a goal measured in days.
+    const input = tempoScoreInputFromSessions(
+      [row('2026-09-14', 'completed', 'am'), row('2026-09-14', 'completed', 'pm')], 6, today,
+    )
+    expect(input.trainedDays).toBe(1)
+  })
+
+  it('still cannot be gamed by over-scheduling a day', () => {
+    // The mission rule, restated at day level: piling sessions onto days you do
+    // not train cannot raise completion.
+    const padded = tempoScoreInputFromSessions(
+      [
+        row('2026-09-14', 'completed'),
+        row('2026-09-13', 'missed', 'a'), row('2026-09-13', 'missed', 'b'),
+        row('2026-09-12', 'missed', 'c'), row('2026-09-12', 'missed', 'd'),
+      ], 6, today,
+    )
+    expect(padded.dueDays).toBe(3)
+    expect(padded.trainedDays).toBe(1)
+    expect(computeTempoScore(padded).components.completion).toBeCloseTo(1 / 3)
+  })
+})

@@ -176,8 +176,8 @@ export function mapLeaderboardV2Rows(rows: Record<string, unknown>[]): Leaderboa
     const scheduled = Number(r.scheduled_this_week) || 0
     const completed = Number(r.completed_this_week) || 0
     const tempo_score = computeTempoScore({
-      dueSessions: Number(r.due_28) || 0,
-      completedSessions: Number(r.completed_28) || 0,
+      dueDays: Number(r.due_28) || 0,
+      trainedDays: Number(r.completed_28) || 0,
       weeksMetGoal: Number(r.weeks_met_goal) || 0,
       currentStreak: Number(r.current_streak) || 0,
       goalPerWeek: Number(r.goal_per_week) || 3,
