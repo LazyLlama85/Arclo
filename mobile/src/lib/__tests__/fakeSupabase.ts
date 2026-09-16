@@ -46,6 +46,7 @@ export function fakeError(message: string): { message: string } {
 }
 
 export function createFakeSupabase(tables: Tables, options: FakeOptions = {}) {
+  let autoId = 0
   const failOps = options.failOps ?? new Set<string>()
 
   function makeBuilder(table: string) {
@@ -54,8 +55,14 @@ export function createFakeSupabase(tables: Tables, options: FakeOptions = {}) {
     let single = false
     let wantCount = false
     let headOnly = false
-    let orderCol: string | null = null
-    let orderAsc = true
+    // Postgrest applies chained .order() calls in sequence (date, then time).
+    // This used to keep a single column and let each call OVERWRITE the last,
+    // so `.order('planned_date').order('planned_start_time')` silently sorted by
+    // time alone — every row in the wrong order, with no error. Any module that
+    // walks its rows in schedule order (the rotation shift, the plan rollover)
+    // was then tested against a scrambled list, which is worse than not testing
+    // it: the test still passes or fails for reasons unrelated to the code.
+    const orders: { col: string; asc: boolean }[] = []
     let limitN: number | null = null
 
     const api: any = {
@@ -78,7 +85,10 @@ export function createFakeSupabase(tables: Tables, options: FakeOptions = {}) {
       lt: (col: string, val: any) => { filters.push((r) => r[col] < val); return api },
       in: (col: string, vals: any[]) => { filters.push((r) => vals.includes(r[col])); return api },
       or: (expr: string) => { filters.push(parseOrClause(expr)); return api },
-      order: (col: string, opts?: { ascending?: boolean }) => { orderCol = col; orderAsc = opts?.ascending !== false; return api },
+      order: (col: string, opts?: { ascending?: boolean }) => {
+        orders.push({ col, asc: opts?.ascending !== false })
+        return api
+      },
       limit: (n: number) => { limitN = n; return api },
       delete: () => { op = { kind: 'delete' }; return api },
       update: (patch: Row) => { op = { kind: 'update', patch }; return api },
@@ -95,18 +105,30 @@ export function createFakeSupabase(tables: Tables, options: FakeOptions = {}) {
             return
           }
           if (op.kind === 'insert') {
-            tables[table] = [...(tables[table] ?? []), ...op.rows]
-            resolve({ data: op.rows, error: null })
+            // Give every inserted row an id, the way the real table's uuid
+            // default does. Without this, generated rows all carried
+            // `id: undefined`, which is not merely untidy: `.eq('id', undefined)`
+            // then matches EVERY such row, so one delete wipes the lot. The
+            // journey harness hit exactly that — dedupe appeared to erase a
+            // whole schedule — and it was an artefact of the fake, not a real
+            // defect. A fake that cannot tell two rows apart cannot test any
+            // module that identifies rows by id.
+            const withIds = op.rows.map((r) =>
+              r.id === undefined ? { ...r, id: `fake-${++autoId}` } : r)
+            tables[table] = [...(tables[table] ?? []), ...withIds]
+            resolve({ data: withIds, error: null })
             return
           }
           const all = tables[table] ?? []
           let matched = all.filter((r) => filters.every((f) => f(r)))
-          if (orderCol) {
-            const col = orderCol
+          if (orders.length) {
             matched = [...matched].sort((a, b) => {
-              if (a[col] === b[col]) return 0
-              const cmp = a[col] > b[col] ? 1 : -1
-              return orderAsc ? cmp : -cmp
+              for (const { col, asc } of orders) {
+                if (a[col] === b[col]) continue
+                const cmp = a[col] > b[col] ? 1 : -1
+                return asc ? cmp : -cmp
+              }
+              return 0
             })
           }
           if (limitN != null) matched = matched.slice(0, limitN)

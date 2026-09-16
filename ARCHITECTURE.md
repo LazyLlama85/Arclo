@@ -2259,6 +2259,22 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   this feature must not have. 21 tests (`rotationShiftPlan.test.ts`) lock the re-stamp, date/time
   invariance, focus-correct exercise selection, offset persistence + accumulation, arbitrary
   re-anchor, and the no-op/no-plan/completed-and-missed-untouched/corrupt-delta guards.
+- **Journey harness (`lib/__tests__/harness/world.ts` + `journeys.test.ts`, 2026-09-15):** a
+  simulated user the real modules run against — seeded profile/plan/exercises/schedule, a clock you
+  can advance, `openApp()` running the real dedupe → missed-sweep → rollover chain, plus
+  `logSets` / `complete` and readable schedule views. Exists because the unit suite answers "does
+  this function compute the right number" and is blind to "do these modules still agree", which is
+  where every serious 2026-09 bug lived (the `materializeSplit` duplication, the rotation/calendar
+  desync, the rotation/travel-mode conflict). Runs under the existing `npx jest` — no emulator, no
+  network, no new dependencies. **Does NOT render React**, so it proves nothing about whether a
+  screen mounts or a button appears; that would need `@testing-library/react-native`. See the
+  harness README for the two traps (real exercise names, seed consistency).
+  Building it also exposed two silent holes in `fakeSupabase` that had been invalidating tests:
+  inserted rows got no `id`, so `.eq('id', undefined)` matched EVERY generated row and a single
+  delete wiped a whole schedule; and chained `.order()` overwrote rather than accumulated, so
+  `.order('planned_date').order('planned_start_time')` sorted by time alone and handed
+  schedule-order logic a scrambled list. Both fixed — a fake that cannot tell two rows apart or
+  order them cannot test any module that walks a schedule.
 - **Work you did is never "missed" (`lib/missedWorkouts.ts`, 2026-09-15):** the sweep now credits a
   past `scheduled` session that has **real logged sets** as `completed` instead of `missed`
   (scheduled_workouts → workout_logs → set_logs; an opened log with zero sets is still a genuine
