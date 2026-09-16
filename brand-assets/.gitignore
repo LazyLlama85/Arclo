@@ -1,0 +1,6 @@
+# Raw downloads kept for review only. The renderer reads brand-assets/photos/,
+# never this folder, and the files are third-party images whose licences vary —
+# keeping them out of the repo avoids shipping anything whose terms we have not
+# checked per file. photo-candidates.json records the metadata.
+photo-raw/
+__pycache__/

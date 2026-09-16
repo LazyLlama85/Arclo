@@ -2259,6 +2259,26 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   this feature must not have. 21 tests (`rotationShiftPlan.test.ts`) lock the re-stamp, date/time
   invariance, focus-correct exercise selection, offset persistence + accumulation, arbitrary
   re-anchor, and the no-op/no-plan/completed-and-missed-untouched/corrupt-delta guards.
+- **Exercise photo search + audit (2026-09-15):** the founder asked for real form rather than drawn
+  figures, sourced free. `brand-assets/find_exercise_photos.py` queries Wikimedia Commons (the only
+  large source serving a machine-readable licence per file) and classifies results CC0/PD →
+  CC BY → CC BY-SA. **Finding: only about a third of the needed lifts have a correctly licensed AND
+  correctly framed photo** — "dips" returns a farm landscape and a photo of a mouth, "pushdown"
+  returns a computer-science automaton diagram, and cable fly / lateral raise / row / pec deck have
+  no CC0 at all. Ruled out on the way: `yuhonas/free-exercise-db` (image provenance unanswered on
+  repo issues #2 and #13 — unknown provenance is not a licence) and Pexels/Unsplash (fine licences,
+  but gym atmosphere rather than specific lifts). `make_slides.py` now takes a photo from
+  `brand-assets/photos/<slug>.<ext>` when present and falls back to the pictogram, duotoning photos
+  into the brand blues so mixed sources read as one set; see `brand-assets/photos/README.md`.
+  Wikimedia rate-limits clients without a descriptive User-Agent and answers with plain text, which
+  decodes as "no results" and is indistinguishable from an empty search — the UA is a requirement,
+  not politeness.
+- **`brand-assets/audit_slides.py` (2026-09-15):** renders all 47 slides and fails on any block
+  overlap, margin breach, or content crossing `SAFE_BOTTOM`. Founder asked to "make sure things
+  aren't overlapping"; eyeballing does not survive the next copy edit, because text is auto-fitted so
+  a longer sentence silently pushes the block below it into the next one. It immediately caught a
+  real 560x45px collision on the 45-minute hook slide, where a `min()` clamp on the art's TOP pulled
+  the graphic up into a two-line subtitle. Run it after any copy change.
 - **Exercise pictograms (`brand-assets/exercise_art.py`, 2026-09-15):** flat vector exercise
   graphics drawn in code (13 of them, plus a contact sheet for reviewing the set together). Founder
   asked for cartoon graphics rather than live people; Higgsfield had 0.8 credits on a free plan, so
@@ -2268,7 +2288,7 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   one line. `draw_exercise` trims each pose to its own bounding box and re-centres it, without which
   every icon keeps whatever slice of the grid it was drawn in and the set lands at wildly different
   visual weights.
-- **TikTok slideshow assets (`brand-assets/make-slides.py` → `brand-assets/slides/`, 2026-09-15):**
+- **TikTok slideshow assets (`brand-assets/make_slides.py` → `brand-assets/slides/`, 2026-09-15):**
   renders all 49 slides of the five faceless slideshow series as finished 1080x1920 PNGs, from the
   app's own palette and Inter weights. Generated rather than sourced for a mechanical reason: TikTok
   auto-advances a slideshow roughly every two seconds, so a slide has to be legible in about one,

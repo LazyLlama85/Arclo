@@ -2,25 +2,28 @@
 
 Playbook: https://claude.ai/code/artifact/f68a35ae-6a98-45b5-a9fa-4cf8822cea75
 
-WHY GENERATE RATHER THAN SOURCE. Most slides in these series are type, not
-photography, and type outperforms stock gym footage here for a mechanical
-reason: TikTok auto-advances a slideshow roughly every two seconds, so a slide
-has to be legible in about one. A bold line on a dark ground wins that; a photo
-with text laid over it does not.
+EXERCISE ART. Each exercise slide takes a photo from brand-assets/photos/ named
+after its art slug (bench_press.jpg, lateral_raise.png ...) and falls back to the
+drawn pictogram in exercise_art.py when there is none. Photos are duotoned into
+the brand blues on the way in, because real exercise photos come from different
+gyms and different decades and six untreated ones in a row read as a scrapbook.
 
-It also sidesteps two traps. Stock footage carries licensing questions, and
-AI-generated lifting imagery gets form wrong in ways a fitness audience spots
-instantly (bar path, grip width, joint angles, the occasional extra finger).
-Publishing that under a training brand costs more credibility than the slide is
-worth. So: exercises are typographic cards here, and the only photographs used
-are real app screenshots.
+The founder asked for real form rather than drawn figures. That search is
+documented in find_exercise_photos.py and photos/README.md; the short version is
+that free, correctly-licensed, correctly-framed photos exist for about a third of
+the lifts these series need, so the pictograms remain the fallback until real
+footage exists. Nothing here blocks on that: drop a file in and the slide changes.
 
-Run:  python brand-assets/make-slides.py
+LAYOUT. Text is auto-fitted, so a longer sentence pushes everything below it
+down. audit_slides.py renders all 47 slides and fails on overlaps, margin
+breaches and anything crossing SAFE_BOTTOM. Run it after any copy edit.
+
+Run:  python brand-assets/make_slides.py
 Out:  brand-assets/slides/<series>/NN.png
 """
 import os
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 
 from exercise_art import draw_exercise
 
@@ -29,6 +32,18 @@ ROOT = os.path.dirname(HERE)
 FONTS = os.path.join(HERE, 'fonts')
 SHOTS = os.path.join(ROOT, 'web', 'img', 'shots')
 OUT = os.path.join(HERE, 'slides')
+# Drop a real photo in here named after the art slug (bench_press.jpg,
+# lateral_raise.png ...) and every slide using that slug switches from the drawn
+# pictogram to the photo automatically. Nothing else has to change.
+PHOTOS = os.path.join(HERE, 'photos')
+
+# Every block a slide draws records its bounding box here, so audit_slides.py can
+# prove nothing overlaps or runs off the frame instead of it being eyeballed.
+LAYOUT = []
+
+
+def track(name, x0, y0, x1, y1):
+    LAYOUT.append({'name': name, 'box': (int(x0), int(y0), int(x1), int(y1))})
 
 W, H = 1080, 1920
 MARGIN = 96
@@ -115,6 +130,7 @@ def wordmark(d):
     d.text((MARGIN, y), 'arclo', font=f, fill=(120, 128, 145))
     w = d.textlength('arclo', font=f)
     d.ellipse([MARGIN + w + 10, y + 12, MARGIN + w + 24, y + 26], fill=ACCENT)
+    track('wordmark', MARGIN, y, MARGIN + w + 24, y + 34)
 
 
 def eyebrow(d, text):
@@ -123,6 +139,7 @@ def eyebrow(d, text):
     f = font('700', 28)
     spaced = ' '.join(text.upper())
     d.text((MARGIN, MARGIN + 6), spaced, font=f, fill=ACCENT)
+    track('eyebrow', MARGIN, MARGIN + 6, MARGIN + d.textlength(spaced, font=f), MARGIN + 6 + 30)
 
 
 def check(d, box, color, kind):
@@ -178,7 +195,9 @@ def phone(img, shot_name, top, height):
     ImageDraw.Draw(mask).rounded_rectangle(
         [0, 0, shot.width - 1, shot.height - 1], radius=rad - bez, fill=255)
     dev.paste(shot, (bez, bez), mask)
-    img.paste(dev, ((W - dev.width) // 2, top), dev)
+    px = (W - dev.width) // 2
+    img.paste(dev, (px, top), dev)
+    track('phone', px, top, px + dev.width, top + dev.height)
 
 
 # ── Slide renderers ──────────────────────────────────────────────────────────
@@ -203,13 +222,50 @@ def info_rows(d, rows, top, label_col=MUTED):
         y += 22
         d.line([(MARGIN, y), (W - MARGIN, y)], fill=(44, 50, 64), width=2)
         y += 26
+    track('rows', MARGIN, top, W - MARGIN, y - 26)
     return y
 
 
+def photo_for(slug):
+    for ext in ('.jpg', '.jpeg', '.png', '.webp'):
+        path = os.path.join(PHOTOS, slug + ext)
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def treat_photo(path, size):
+    """Square crop, then duotone into the brand blues.
+
+    Real exercise photos come from wherever you can get them, which means
+    different lighting, different gyms, different decades. Untreated, six of
+    them in a row read as a scrapbook. Collapsing them to one two-colour ramp
+    makes disparate sources look like a single set, which is the only way mixed
+    sources survive next to each other."""
+    im = Image.open(path).convert('RGB')
+    w, h = im.size
+    side = min(w, h)
+    # Bias the crop upward: subjects sit above centre far more often than below.
+    top = max(0, int((h - side) * 0.35))
+    left = (w - side) // 2
+    im = im.crop((left, top, left + side, top + side)).resize((size, size), Image.LANCZOS)
+    g = ImageEnhance.Contrast(ImageOps.grayscale(im)).enhance(1.25)
+    duo = ImageOps.colorize(g, black=(14, 18, 32), white=(198, 216, 255), mid=(52, 92, 170))
+    duo = ImageEnhance.Brightness(duo).enhance(0.92)
+    out = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    mask = Image.new('L', (size, size), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, size - 1, size - 1],
+                                           radius=int(size * 0.1), fill=255)
+    out.paste(duo, (0, 0), mask)
+    return out
+
+
 def art(img, name, size, top, center=True, x=None):
-    a = draw_exercise(name, size)
+    path = photo_for(name)
+    a = treat_photo(path, size) if path else draw_exercise(name, size)
     px = (W - size) // 2 if center else x
     img.paste(a, (px, top), a)
+    track('art', px, top, px + size, top + size)
 
 
 def tier_badge(d, letter, x, y):
@@ -223,6 +279,7 @@ def tier_badge(d, letter, x, y):
 
 
 def render(spec):
+    LAYOUT.clear()
     kind = spec.get('kind', 'point')
     img = ground(glow_y=spec.get('glow', 0.32), glow_strength=spec.get('glow_s', 1.0))
     d = ImageDraw.Draw(img)
@@ -232,18 +289,32 @@ def render(spec):
     if kind == 'hook':
         f, lines = fit(d, spec['text'], '800', 140, 70, box_w, 620, 1.03)
         y = draw_lines(d, lines, f, MARGIN, 250, INK, 1.03)
+        track('title', MARGIN, 250, W - MARGIN, y)
         if spec.get('sub'):
             fs, ls = fit(d, spec['sub'], '500', 52, 34, box_w, 260, 1.25)
-            y = draw_lines(d, ls, fs, MARGIN, y + 34, ACCENT, 1.25)
+            y0 = y + 34
+            y = draw_lines(d, ls, fs, MARGIN, y0, ACCENT, 1.25)
+            track('sub', MARGIN, y0, W - MARGIN, y)
         if spec.get('art'):
-            art(img, spec['art'], 560, min(y + 60, 880))
+            # Clamping the TOP was the bug the layout audit caught: a two-line
+            # sub pushed y past 880, min() then yanked the art back UP into the
+            # text, and it overlapped by 45px. Keep the art below the text
+            # always, and shrink it when the room is tight — a smaller graphic
+            # is fine, a collision never is.
+            top = y + 60
+            size = min(560, SAFE_BOTTOM - top - 20)
+            if size >= 260:
+                art(img, spec['art'], size, top)
 
     elif kind == 'point':
         f, lines = fit(d, spec['text'], '800', 104, 56, box_w, 400, 1.06)
         y = draw_lines(d, lines, f, MARGIN, 210, INK, 1.06)
+        track('title', MARGIN, 210, W - MARGIN, y)
         if spec.get('sub'):
             fs, ls = fit(d, spec['sub'], '400', 46, 30, box_w, 280, 1.3)
-            y = draw_lines(d, ls, fs, MARGIN, y + 26, MUTED, 1.3)
+            y0 = y + 26
+            y = draw_lines(d, ls, fs, MARGIN, y0, MUTED, 1.3)
+            track('sub', MARGIN, y0, W - MARGIN, y)
         if spec.get('art'):
             art(img, spec['art'], 460, y + 40)
             y += 460 + 70
@@ -255,13 +326,17 @@ def render(spec):
         if spec.get('tier'):
             x = tier_badge(d, spec['tier'], MARGIN, 168)
         f, lines = fit(d, spec['name'], '800', 86, 48, W - x - MARGIN, 260, 1.05)
-        draw_lines(d, lines, f, x, 178, INK, 1.05)
+        ny = draw_lines(d, lines, f, x, 178, INK, 1.05)
+        track('title', x, 178, W - MARGIN, ny)
         art(img, spec['art'], 470, 370)
         info_rows(d, spec['rows'], 900)
 
     elif kind == 'list':
         f, lines = fit(d, spec['text'], '800', 86, 52, box_w, 240, 1.06)
-        y = draw_lines(d, lines, f, MARGIN, 190, INK, 1.06) + 40
+        y = draw_lines(d, lines, f, MARGIN, 190, INK, 1.06)
+        track('title', MARGIN, 190, W - MARGIN, y)
+        y += 40
+        items_top = y
         rows = [i.split('|', 1) for i in spec['items']]
         vf = font('700', 44)
         for row in rows:
@@ -276,14 +351,19 @@ def render(spec):
                        'C': MUTED, 'D': DANGER}.get(value, ACCENT)
                 d.text((W - MARGIN - d.textlength(value, font=vf), y + 2), value, font=vf, fill=col)
             y += int(len(li) * fi.size * 1.2) + 24
+        track('items', MARGIN, items_top, W - MARGIN, y)
         if spec.get('foot'):
             fs, ls = fit(d, spec['foot'], '400', 42, 28, box_w, 200, 1.3)
-            draw_lines(d, ls, fs, MARGIN, min(y + 40, SAFE_BOTTOM - 120), MUTED, 1.3)
+            fy = min(y + 40, SAFE_BOTTOM - 120)
+            fend = draw_lines(d, ls, fs, MARGIN, fy, MUTED, 1.3)
+            track('foot', MARGIN, fy, W - MARGIN, fend)
 
     elif kind == 'calendar':
         f, lines = fit(d, spec['text'], '800', 92, 52, box_w, 300, 1.06)
         y = draw_lines(d, lines, f, MARGIN, 200, INK, 1.06)
+        track('title', MARGIN, 200, W - MARGIN, y)
         calendar(d, spec['days'], y + 70)
+        track('art', MARGIN, y + 70, W - MARGIN, y + 70 + 175)
         y = y + 70 + 175
         if spec.get('sub'):
             fs, ls = fit(d, spec['sub'], '400', 46, 30, box_w, 240, 1.3)
@@ -294,14 +374,19 @@ def render(spec):
     elif kind == 'cta':
         f, lines = fit(d, spec['text'], '800', 100, 54, box_w, 300, 1.05)
         y = draw_lines(d, lines, f, MARGIN, 150, INK, 1.05)
+        track('title', MARGIN, 150, W - MARGIN, y)
         if spec.get('sub'):
             fs, ls = fit(d, spec['sub'], '400', 42, 28, box_w, 240, 1.32)
-            y = draw_lines(d, ls, fs, MARGIN, y + 24, MUTED, 1.32)
+            y0 = y + 24
+            y = draw_lines(d, ls, fs, MARGIN, y0, MUTED, 1.32)
+            track('sub', MARGIN, y0, W - MARGIN, y)
         phone(img, spec['shot'], y + 34, 680)
         ff = font('700', 44)
         foot = spec.get('foot', 'Free on iPhone and Android')
         tw = d.textlength(foot, font=ff)
-        d.text(((W - tw) / 2, min(y + 34 + 680 + 40, SAFE_BOTTOM - 50)), foot, font=ff, fill=ACCENT)
+        fy = min(y + 34 + 680 + 40, SAFE_BOTTOM - 50)
+        d.text(((W - tw) / 2, fy), foot, font=ff, fill=ACCENT)
+        track('foot', (W - tw) / 2, fy, (W + tw) / 2, fy + 50)
         return img
 
     wordmark(d)
@@ -336,13 +421,11 @@ MISSED = ('01-missed-push-day', [
          rows=[('cost', 'About 10 minutes'), ('recovers', 'Most of the volume you lost')]),
     dict(kind='ex', eyebrow='the make-up', name='Incline DB press', art='incline_press',
          rows=[('sets', '2 x 8'), ('why this one', 'It is the compound. If you only do one, do this.'),
-               ('cue', 'Bench at 30 degrees. Steeper turns it into a shoulder press.')]),
+               ('most people', 'Set the bench too steep and it quietly becomes a shoulder press.')]),
     dict(kind='ex', eyebrow='the make-up', name='Lateral raise', art='lateral_raise',
-         rows=[('sets', '2 x 15'), ('why this one', 'Side delts recover fast and cost you almost nothing.'),
-               ('cue', 'Lead with your elbows, not your hands.')]),
+         rows=[('sets', '2 x 15'), ('why this one', 'Side delts recover fast and cost you almost nothing.')]),
     dict(kind='ex', eyebrow='the make-up', name='Triceps pushdown', art='pushdown',
-         rows=[('sets', '1 x 15'), ('why this one', 'One burnout set and you are done.'),
-               ('cue', 'Elbows pinned to your sides.')]),
+         rows=[('sets', '1 x 15'), ('why this one', 'One burnout set and you are done.')]),
     dict(kind='point', text='One rule.',
          sub='Only make up the compound and one or two accessories. Chase everything you missed and a 45 minute session becomes 90.'),
     dict(kind='list', text='The 10 minute make-up', items=[
@@ -359,33 +442,28 @@ RANKED = ('02-push-ranked', [
     dict(kind='ex', tier='S', name='Incline dumbbell press', art='incline_press',
          rows=[('builds', 'Upper chest, front delts, triceps'),
                ('why S', 'Upper chest is the difference between a big chest and a wide one.'),
-               ('cue', 'Bench at 30 degrees. Steeper and it becomes a shoulder press.')]),
+               ('most people', 'Set the bench near 45 degrees, which trains delts, not upper chest.')]),
     dict(kind='ex', tier='S', name='Overhead press', art='overhead_press',
          rows=[('builds', 'Front and side delts, triceps'),
-               ('why S', 'The only press that builds shoulders you can see from behind.'),
-               ('cue', 'Squeeze your glutes so you do not lean back under the bar.')]),
+               ('why S', 'The only press that builds shoulders you can see from behind.')]),
     dict(kind='ex', tier='A', name='Dips', art='dips',
          rows=[('builds', 'Lower chest, triceps, front delts'),
-               ('why A', 'Loadable, deep stretch, and most people never do them.'),
-               ('cue', 'Lean forward for chest. Stay upright for triceps.')]),
+               ('why A', 'Loadable, deep stretch, and most people never do them.')]),
     dict(kind='ex', tier='A', name='Cable fly', art='cable_fly',
          rows=[('builds', 'Chest, across the whole range'),
                ('why A', 'Constant tension where a dumbbell gives you none at the top.'),
-               ('cue', 'Soft elbow, held. If the angle changes you are pressing.')]),
+               ('most people', 'Bend and straighten the elbow, which turns a fly into a bad press.')]),
     dict(kind='ex', tier='B', name='Flat barbell bench', art='bench_press',
          rows=[('builds', 'Chest, front delts, triceps'),
-               ('why only B', 'Brilliant for pressing heavy. Average for building a chest.'),
-               ('cue', 'Those are different goals. Pick which one you are training for.')]),
+               ('why only B', 'Brilliant for pressing heavy. Average for building a chest.')]),
     dict(kind='point', text='Yes. B.',
          sub='Bench is a strength lift that happens to hit chest. If your goal is size, it is not the best tool you own.'),
     dict(kind='ex', tier='C', name='Pec deck', art='cable_fly',
          rows=[('builds', 'Chest, short range'),
-               ('why C', 'Fine as a finisher. Not a reason to skip a press.'),
-               ('cue', 'Use it at the end, never at the start.')]),
+               ('why C', 'Fine as a finisher. Not a reason to skip a press.')]),
     dict(kind='ex', tier='D', name='Push-ups as your main lift', art='pushup',
          rows=[('builds', 'Chest, triceps, core'),
-               ('why D', 'Great for your first month. You outgrew them in your second.'),
-               ('cue', 'If you can do 20, you need load, not more reps.')]),
+               ('why D', 'Great for your first month. You outgrew them in your second.')]),
     dict(kind='list', text='The whole list', items=[
         'Incline dumbbell press|S', 'Overhead press|S', 'Dips|A',
         'Cable fly|A', 'Flat barbell bench|B', 'Pec deck|C'],
@@ -399,23 +477,20 @@ FORTYFIVE = ('03-45-minute-push', [
     dict(kind='hook', eyebrow='45 minutes', text='A push day that actually fits in 45 minutes.',
          sub='Six moves. Nothing you will skip.', art='clock'),
     dict(kind='ex', eyebrow='1 of 6', name='Incline DB press', art='incline_press',
-         rows=[('sets', '3 x 6-8'), ('rest', '2 minutes'),
-               ('cue', 'Leave one rep in the tank on the first two sets.')]),
+         rows=[('sets', '3 x 6-8'), ('rest', '2 minutes')]),
     dict(kind='ex', eyebrow='2 of 6', name='Overhead press', art='overhead_press',
-         rows=[('sets', '3 x 6-8'), ('rest', '2 minutes'),
-               ('cue', 'Brace your ribs down before the bar moves.')]),
+         rows=[('sets', '3 x 6-8'), ('rest', '2 minutes')]),
     dict(kind='ex', eyebrow='3 of 6', name='Dips', art='dips',
          rows=[('sets', '3 x 8-10'), ('rest', '90 seconds'),
-               ('cue', 'Lean forward. Upright turns this into a triceps move.')]),
+               ('most people', 'Stay upright and wonder why their chest never grows from dips.')]),
     dict(kind='ex', eyebrow='4 of 6', name='Cable fly', art='cable_fly',
          rows=[('sets', '2 x 12-15'), ('rest', '60 seconds'),
-               ('cue', 'Slow on the way out. That half is the whole exercise.')]),
+               ('most people', 'Rush the stretch, which is the half that actually builds the chest.')]),
     dict(kind='ex', eyebrow='5 of 6', name='Lateral raise', art='lateral_raise',
          rows=[('sets', '3 x 15'), ('rest', '45 seconds'),
-               ('cue', 'Lighter than your ego wants. Swinging trains nothing.')]),
+               ('most people', 'Go too heavy and swing, so the delts never do the work.')]),
     dict(kind='ex', eyebrow='6 of 6', name='Triceps pushdown', art='pushdown',
-         rows=[('sets', '2 x 12'), ('rest', '45 seconds'),
-               ('cue', 'Finish it and go home. No fourth set.')]),
+         rows=[('sets', '2 x 12'), ('rest', '45 seconds')]),
     dict(kind='list', text='The full session', items=[
         'Incline DB press|3 x 6-8', 'Overhead press|3 x 6-8', 'Dips|3 x 8-10',
         'Cable fly|2 x 12-15', 'Lateral raise|3 x 15', 'Triceps pushdown|2 x 12'],
@@ -494,4 +569,5 @@ def main():
     print(f'\n{total} slides -> {OUT}')
 
 
-main()
+if __name__ == '__main__':
+    main()
