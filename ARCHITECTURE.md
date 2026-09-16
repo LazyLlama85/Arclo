@@ -2279,7 +2279,22 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   a longer sentence silently pushes the block below it into the next one. It immediately caught a
   real 560x45px collision on the 45-minute hook slide, where a `min()` clamp on the art's TOP pulled
   the graphic up into a two-line subtitle. Run it after any copy change.
-- **Exercise pictograms (`brand-assets/exercise_art.py`, 2026-09-15):** flat vector exercise
+- **The Arclo Coach lifting (`brand-assets/exercise_art.py`, rewritten 2026-09-16):** the exercise
+  art is now the app's own mascot (`brand-assets/coach-poses`, reference sheet
+  `tempo-coach-reference-sheet.jpeg`) performing each lift. The shipped coach idles, waves, walks,
+  sprints and does a jumping jack; it had never lifted anything. Using it means the exercise art IS
+  the brand, costs nothing, and stays consistent forever. Colour is the coach's own blue sampled
+  from `idle.png` (49,111,234); equipment pale, machines dim grey, same hierarchy as the sheet.
+  Founder asked to make it "more buff": figures are built from tapered strokes with a real V (
+  shoulders ~3.5x an upper arm, waist ~two thirds of shoulders). A first pass at shoulder half-width
+  150 was too heavy — limbs merged into the trunk and heads vanished into shoulders, so every pose
+  read as a blob; what makes a figure look strong is the RATIO, not absolute mass.
+  **The `HALO` is the load-bearing trick:** limbs and head are drawn with a ground-coloured outline
+  so an arm crossing the torso cuts a visible gap. A flat single-colour figure is fine standing
+  still (all the shipped mascot ever does) and turns to mush the moment limbs overlap the trunk,
+  which is every lift. Side-view poses additionally need the head clear of the torso's rounded cap,
+  which extends a full shoulder half-width back from its start point.
+- **Superseded: generic pictograms (2026-09-15):** flat vector exercise
   graphics drawn in code (13 of them, plus a contact sheet for reviewing the set together). Founder
   asked for cartoon graphics rather than live people; Higgsfield had 0.8 credits on a free plan, so
   AI generation was not available without a purchase, and it was the wrong tool anyway — image models
