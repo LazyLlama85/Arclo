@@ -2259,6 +2259,18 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   this feature must not have. 21 tests (`rotationShiftPlan.test.ts`) lock the re-stamp, date/time
   invariance, focus-correct exercise selection, offset persistence + accumulation, arbitrary
   re-anchor, and the no-op/no-plan/completed-and-missed-untouched/corrupt-delta guards.
+- **TikTok slideshow assets (`brand-assets/make-slides.py` → `brand-assets/slides/`, 2026-09-15):**
+  renders all 49 slides of the five faceless slideshow series as finished 1080x1920 PNGs, from the
+  app's own palette and Inter weights. Generated rather than sourced for a mechanical reason: TikTok
+  auto-advances a slideshow roughly every two seconds, so a slide has to be legible in about one,
+  and type on a dark ground wins that where a photo with text over it does not. It also avoids two
+  traps — stock footage licensing, and AI-generated lifting imagery, which gets bar path, grip width
+  and joint angles wrong in ways a fitness audience spots instantly (publishing that under a
+  training brand costs more credibility than the slide is worth). **Exercises are typographic cards;
+  the only photographs are the real screenshots in `web/img/shots/`**, composited into a drawn
+  bezel, never a mockup. `SAFE_BOTTOM = 1500` keeps every call to action clear of TikTok's caption
+  and action-rail overlay. Playbook (copy, hooks, posting order):
+  `https://claude.ai/code/artifact/f68a35ae-6a98-45b5-a9fa-4cf8822cea75`.
 - **Tempo Score counts DAYS, not sessions (`lib/tempoScore.ts` + `friends_leaderboard_v2`,
   migration `fix_tempo_score_day_level.sql`, **applied**, 2026-09-15):** founder, on his own 287 —
   "sometimes I skip my planned workout to schedule the one I wanna do, my score shouldn't be
