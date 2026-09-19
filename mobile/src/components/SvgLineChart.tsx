@@ -9,6 +9,7 @@
 import { View, Text, StyleSheet } from 'react-native'
 import Svg, { Path, Defs, LinearGradient, Stop, Circle } from 'react-native-svg'
 import { Spacing, type Palette } from '@/constants/theme'
+import { chartDomain, normalize } from '@/lib/chartScale'
 import { useTheme, useThemedStyles } from '@/theme'
 
 export interface ChartPoint {
@@ -21,12 +22,15 @@ interface Props {
   height?: number
   color?: string
   emptyText?: string
+  /** Smallest y-axis span, as a fraction of the average value. See lib/chartScale.
+   *  Pass 0 to plot edge to edge. */
+  minSpanRatio?: number
 }
 
 const VB_W = 320
 const PAD_Y = 12
 
-export function SvgLineChart({ points, height = 110, color, emptyText }: Props) {
+export function SvgLineChart({ points, height = 110, color, emptyText, minSpanRatio }: Props) {
   const C = useTheme()
   const styles = useThemedStyles(makeStyles)
   const stroke = color ?? C.primary
@@ -40,20 +44,19 @@ export function SvgLineChart({ points, height = 110, color, emptyText }: Props) 
   }
 
   const values = points.map((p) => p.value)
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  const range = max - min
   const usableH = height - PAD_Y * 2
   const stepX = points.length > 1 ? VB_W / (points.length - 1) : 0
 
-  // A flat trend (every value identical — e.g. a stable weigh-in streak) has no
-  // range to normalize against. Falling back to `range = 1` would map every point
-  // to the same y as the *minimum*, drawing the line pinned to the chart's floor
-  // instead of a flat line through the middle — reading as broken/crashed data
-  // rather than "nothing's changed."
+  // The axis used to be exactly [min, max], so the biggest value always touched
+  // the ceiling and the smallest always the floor. Every chart then looked the
+  // same whatever happened: a half-pound wobble and a thirty-pound cut both drew
+  // a line across the whole frame. chartDomain enforces a minimum span so small
+  // movements read as small, and a flat run lands in the middle rather than
+  // pinned to the floor.
+  const domain = chartDomain(values, minSpanRatio)
   const coords = points.map((p, i) => ({
     x: i * stepX,
-    y: range === 0 ? PAD_Y + usableH / 2 : PAD_Y + usableH - ((p.value - min) / range) * usableH,
+    y: PAD_Y + usableH - normalize(p.value, domain) * usableH,
   }))
 
   const linePath = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`).join(' ')

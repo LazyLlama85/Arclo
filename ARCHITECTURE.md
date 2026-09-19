@@ -2279,6 +2279,20 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   a longer sentence silently pushes the block below it into the next one. It immediately caught a
   real 560x45px collision on the 45-minute hook slide, where a `min()` clamp on the art's TOP pulled
   the graphic up into a two-line subtitle. Run it after any copy change.
+- **`lib/chartScale.ts` + `SvgLineChart` (2026-09-19):** trend charts no longer normalise onto
+  `[min, max]`. Founder: "if you drop 10 pounds it looks like you dropped so much." The old scale put
+  the largest value on the ceiling and the smallest on the floor, so **every chart looked identical
+  regardless of what happened** — a half-pound overnight wobble and a thirty-pound cut both drew a
+  line across the whole frame. The shape carried no information; only the axis labels did, and
+  nobody reads those on a small card. Misleading in both directions, too: a beginner who drops two
+  pounds sees a cliff, and real progress a month later looks no different. `chartDomain` enforces a
+  **minimum span proportional to the values** (`MIN_SPAN_RATIO` 0.15 of the average magnitude) plus
+  12% headroom, so it only ever zooms OUT — a genuinely large change still uses the real range and
+  nothing is ever clipped. Proportional rather than absolute because the chart is shared across
+  bodyweight, estimated 1RM and weekly set counts, where ten units means three different things.
+  Magnitude rather than signed average so a series straddling zero does not collapse the span.
+  For the founder's 10 lb at ~180 lb the line now occupies ~30% of the chart height instead of 100%.
+  `minSpanRatio={0}` restores the old behaviour per caller. 12 tests.
 - **`lib/storeCopy.ts` (2026-09-19):** platform-correct billing wording. The paywall hardcoded
   Apple's — "Payment is charged to your Apple ID... Manage or cancel in your App Store settings" —
   and was shown to Android users too, who are live on Play. Factually wrong on a screen that takes
