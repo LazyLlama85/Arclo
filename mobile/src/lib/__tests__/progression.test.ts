@@ -200,3 +200,37 @@ describe('progression — volume-landmark cap (B5.4)', () => {
     expect(p.reason).toMatch(/protect recovery/i)
   })
 })
+
+
+// ── Strength charts have to survive a rep change ─────────────────────────────
+//
+// Founder, 2026-09-19: "should the graphs account for reps as well, if you start
+// lowering weight, higher ing reps".
+//
+// They already do, and this pins it. The exercise-progress chart plots best
+// estimated 1RM per session, not the heaviest weight lifted, so moving from
+// heavy triples to lighter high-rep work reads as roughly flat rather than as a
+// collapse. Plotting raw weight would show a cliff for someone who simply
+// changed rep range, which is the single most common way a strength chart lies.
+describe('estimate1RM across rep ranges', () => {
+  it('treats a deload into higher reps as roughly equal strength', () => {
+    const heavy = estimate1RM(225, 5)   // a hard five
+    const lighter = estimate1RM(185, 12) // same lifter, volume block
+    expect(Math.abs(heavy - lighter) / heavy).toBeLessThan(0.05)
+  })
+
+  it('still rises when the lifter actually gets stronger', () => {
+    expect(estimate1RM(245, 5)).toBeGreaterThan(estimate1RM(225, 5))
+    expect(estimate1RM(185, 15)).toBeGreaterThan(estimate1RM(185, 12))
+  })
+
+  it('does not reward dropping the weight alone', () => {
+    // Fewer reps at a lighter load is genuinely less, and must read that way.
+    expect(estimate1RM(135, 5)).toBeLessThan(estimate1RM(225, 5))
+  })
+
+  it('a single rep is the weight itself', () => {
+    expect(estimate1RM(225, 1)).toBe(225)
+    expect(estimate1RM(225, 0)).toBe(225)
+  })
+})

@@ -114,3 +114,52 @@ describe('legal text', () => {
     }
   })
 })
+
+
+// ── Say where the data actually goes ─────────────────────────────────────────
+//
+// Founder, 2026-09-19: "make sure terms specifically state where data is going
+// eg supabase". The Terms said "cloud infrastructure for storage", which names
+// nobody. A policy that will not name its processors is the kind users and
+// reviewers are right to distrust, and vague hosting language is a weak spot
+// under GDPR/CCPA disclosure expectations.
+describe('data processors are named', () => {
+  const { PRIVACY_SECTIONS, TERMS_SECTIONS } = require('@/constants/legalContent')
+
+  const textOf = (sections: any[], fill: (t: string) => string) => {
+    const out: string[] = []
+    for (const sec of sections) {
+      out.push(fill(sec.title ?? ''))
+      for (const b of sec.blocks ?? []) {
+        if (typeof b?.p === 'string') out.push(fill(b.p))
+        if (typeof b?.sub === 'string') out.push(fill(b.sub))
+        for (const li of b?.bullets ?? []) if (typeof li === 'string') out.push(fill(li))
+        for (const li of b?.list ?? []) if (typeof li === 'string') out.push(fill(li))
+      }
+    }
+    return out.join(String.fromCharCode(10))
+  }
+
+  it('the Terms name every processor, not just "cloud infrastructure"', () => {
+    const terms = textOf(TERMS_SECTIONS, loadFor('ios').fillLegalText)
+    for (const name of ['Supabase', 'RevenueCat', 'PostHog', 'Sentry', 'Google Calendar']) {
+      expect(terms).toContain(name)
+    }
+    expect(terms).not.toMatch(/cloud infrastructure for storage/)
+  })
+
+  it('the Privacy Policy says where the data physically lives', () => {
+    const privacy = textOf(PRIVACY_SECTIONS, loadFor('ios').fillLegalText)
+    expect(privacy).toContain('Supabase')
+    expect(privacy).toContain('United States')
+    // The actual region, so the claim is checkable rather than decorative.
+    expect(privacy).toContain('us-east-2')
+  })
+
+  it('both documents still name the payment processor per platform', () => {
+    const ios = textOf(TERMS_SECTIONS, loadFor('ios').fillLegalText)
+    const android = textOf(TERMS_SECTIONS, loadFor('android').fillLegalText)
+    expect(ios).toContain('App Store')
+    expect(android).toContain('Google Play')
+  })
+})

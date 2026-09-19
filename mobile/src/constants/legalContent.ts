@@ -127,6 +127,17 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
     ],
   },
   {
+    title: 'Where your data is stored',
+    blocks: [
+      {
+        p: 'Your account, plans, workouts and logs live in a Postgres database hosted by Supabase in the United States (AWS us-east-2, Ohio). Files you upload, such as progress photos, are stored in Supabase Storage in the same region. Access is restricted by row-level security so one account cannot read another’s data.',
+      },
+      {
+        p: 'Our other providers process data in the United States as well. If you use {brand} from outside the United States, your information is transferred there and handled under this policy and the providers’ own terms.',
+      },
+    ],
+  },
+  {
     title: 'How long we keep it',
     blocks: [
       {
@@ -241,7 +252,7 @@ export const TERMS_SECTIONS: LegalSection[] = [
     title: 'Third-party services',
     blocks: [
       {
-        p: '{brand} depends on third parties to work, including Apple and Google for sign-in, Google Calendar for optional scheduling, {store} for payments, and cloud infrastructure for storage. Your use of those services is governed by their own terms and privacy policies. Google Calendar data is handled per the Google API Services User Data Policy, including its Limited Use requirements, as described in our Privacy Policy.',
+        p: '{brand} depends on third parties to work: Supabase for the database, authentication and file storage that hold your account and training data; Apple and Google for sign-in; Google Calendar for optional scheduling; {store} and RevenueCat for payments and subscription management; Expo Push, APNs and FCM for notifications; PostHog for product analytics; and Sentry for crash reporting. Your data is stored in the United States. Your use of those services is governed by their own terms and privacy policies, and our Privacy Policy sets out exactly what each one receives. Google Calendar data is handled per the Google API Services User Data Policy, including its Limited Use requirements.',
       },
     ],
   },

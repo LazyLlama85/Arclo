@@ -2302,6 +2302,21 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   than part of `purchases.ts` **so it can be tested**: purchases.ts reaches the RevenueCat SDK and
   Sentry, neither of which loads under ts-jest's Node env, which would have left the one string with
   legal weight as the one string nothing covers. 3 tests.
+- **Processors named, storage location stated (2026-09-19):** the Terms said "cloud infrastructure
+  for storage", which names nobody. They now name every processor — **Supabase** (database, auth,
+  file storage), Apple/Google (sign-in), Google Calendar, the store + RevenueCat (payments),
+  Expo Push/APNs/FCM, PostHog, Sentry — and state that data is stored in the United States. The
+  Privacy Policy gained a **"Where your data is stored"** section naming the real region
+  (`us-east-2`, Ohio, confirmed against the live project) and covering international transfer for
+  non-US users. Mirrored in `web/terms.html` and `web/privacy.html` (sections renumbered). 3 tests
+  assert the processors are named, that "cloud infrastructure for storage" cannot come back, and
+  that the region claim is present — so the disclosure stays checkable rather than decorative.
+- **Strength charts are rep-aware (verified, not changed, 2026-09-19):** founder asked whether the
+  graphs account for reps "if you start lowering weight, higher ing reps". They already do:
+  `exercise-progress` plots the best **estimated 1RM** per session (`progression.estimate1RM`,
+  Epley), not the heaviest weight lifted, so 225x5 and 185x12 land within 5% of each other and a
+  move into a volume block reads as flat rather than a collapse. Plotting raw weight is the single
+  most common way a strength chart lies about a rep-range change. 4 tests pin the property.
 - **Legal text is store-aware too (2026-09-19, follow-up):** fixing the paywall was not enough —
   the **Terms of Use and Privacy Policy said Apple only**, and those are linked straight from the
   purchase screen, which is exactly where App Review opens them. `constants/legalContent.ts` billing
