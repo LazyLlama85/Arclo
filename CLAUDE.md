@@ -46,8 +46,8 @@ check whether an existing Tempo system already solves part of the problem and wh
 extended safely. Explicitly justify every new architectural component.
 
 (For large multi-part builds, do this analysis up front and proportionally — a short written pass for
-small changes, a full plan document for anything touching multiple systems. See `EXECUTION_STATUS.md`'s
-Open Backlog and `STRATEGY_PLANS.md` for the depth expected on big features.)
+small changes, a full plan document for anything touching multiple systems. See `docs/EXECUTION_STATUS.md`'s
+Open Backlog and `docs/STRATEGY_PLANS.md` for the depth expected on big features.)
 
 ## GitHub Push Protocol
 After each logical unit of work (a bug fix, a feature, a self-contained change) — commit it and
@@ -65,28 +65,28 @@ in the same turn so it stays an accurate map of the system.
 ## Execution Protocol (how the audit gets built)
 The roadmap for turning Tempo into a 10/10 product runs on three repo files — read them in this
 order when doing improvement work:
-1. **`EXECUTION_STATUS.md`** — the living ledger. **Read it FIRST every session**; its "▶ Current
+1. **`docs/EXECUTION_STATUS.md`** — the living ledger. **Read it FIRST every session**; its "▶ Current
    Focus" is the resume point. **Update it LAST every session** (status, Current Focus, handoff note).
-2. **`EXECUTION.md`** — the plan: milestones, batch build-order, dependency map, risk analysis, the
+2. **`docs/EXECUTION.md`** — the plan: milestones, batch build-order, dependency map, risk analysis, the
    20/80, anti-over-engineering guardrails, and the copy-paste **prompt library** (§8).
-3. **`PRODUCT_AUDIT.html`** — the diagnosis + scores (kept current via the Audit Artifact Protocol below).
+3. **`docs/PRODUCT_AUDIT.html`** — the diagnosis + scores (kept current via the Audit Artifact Protocol below).
 
 **The loop (never skip a step):** orient (read the ledger) → confirm the batch + its completion
 criteria → build additively (No-Regressions) touching only that batch's files → verify
 (`tsc` + tests + `/verify`) → set the row's status + Current Focus + handoff note → update
-`PRODUCT_AUDIT.html` → scoped commit + push. **One batch per session.** Every batch names the metric
+`docs/PRODUCT_AUDIT.html` → scoped commit + push. **One batch per session.** Every batch names the metric
 it moves; if it names none, it's not a batch — cut it. Respect the §2 Reject/Postpone lists and the
 §5 dependency edges (e.g. don't build the Home calendar timeline before OAuth is on Production). Do
 NOT start new feature surfaces before milestone M4 (retention proof) — depth, not breadth.
 
 ## Audit Artifact Protocol
-`PRODUCT_AUDIT.html` (repo root) is the **canonical source** for the brutal product-audit
+`docs/PRODUCT_AUDIT.html` is the **canonical source** for the brutal product-audit
 artifact, published at
 `https://claude.ai/code/artifact/6d53765f-21fe-4fff-bc04-ca9eaac67928`. It is written in the
 original brief's voice — *a panel of ruthless experts; criticize everything; no compliments;
 hard truths only; current-score vs potential-score with honest gaps.*
 
-**Every time you change the app in a session, update `PRODUCT_AUDIT.html` in the same turn**,
+**Every time you change the app in a session, update `docs/PRODUCT_AUDIT.html` in the same turn**,
 then re-publish it with the Artifact tool passing
 `url=https://claude.ai/code/artifact/6d53765f-21fe-4fff-bc04-ca9eaac67928` so it keeps the same
 link. Rules:

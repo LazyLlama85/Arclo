@@ -49,7 +49,7 @@ A detailed description of everything Arclo is — frontend, backend, features, d
 > the friends list, and group members.
 
 > **Rest-timer Live Activity SHELVED 2026-08-26 (not deleted).** It rendered as a blank dark
-> capsule on a real device — no ring, no label, no countdown (`EXECUTION_STATUS.md` N7) — and
+> capsule on a real device — no ring, no label, no countdown (`docs/EXECUTION_STATUS.md` N7) — and
 > diagnosing `expo-widgets`' SwiftUI compilation pass needs Xcode on a Mac. Rather than ship a
 > visibly broken Lock Screen surface into App Review as Guideline 2.1 bait, it was switched off at
 > the **module-resolution** layer: `widgets/RestTimerActivity.ios.tsx` moved to
@@ -81,11 +81,11 @@ A detailed description of everything Arclo is — frontend, backend, features, d
 > now returns a `CreateGroupResult` discriminating `blocked` from `failed`, and the display-name
 > save **stops discarding its error** — it previously swallowed every failure and reported success.
 
-> **Active fix roadmap:** `EXECUTION_STATUS.md`'s Open Backlog section is the execution-ready
+> **Active fix roadmap:** `docs/EXECUTION_STATUS.md`'s Open Backlog section is the execution-ready
 > inventory of everything still wrong in the code/logic/UI described below (absorbed from the
 > retired `MASTER_FIX_PLAN.md`, a 2026-07-19 full-codebase review), with per-item files/scope.
-> `PRODUCT_AUDIT.html` carries the honest re-score that review produced (a separate Product Score
-> vs. Market Proof Score). Read `EXECUTION_STATUS.md` before starting new work on any system this
+> `docs/PRODUCT_AUDIT.html` carries the honest re-score that review produced (a separate Product Score
+> vs. Market Proof Score). Read `docs/EXECUTION_STATUS.md` before starting new work on any system this
 > document describes.
 
 ---
@@ -786,7 +786,7 @@ change when it happens rather than labeling every week regardless. **Goal ETA fi
   on Home to spotlight on its own; the anchor now wraps the ENTIRE conditional render (loading/error/
   empty/timeline) in one always-present `View` so the tour target survives every branch, matching
   the invariant the old per-day anchor relied on. **Not yet on-device verified** — flagged 🔍, needs
-  the checklist in `EXECUTION_STATUS.md`'s session log before this can be trusted, same discipline
+  the checklist in `docs/EXECUTION_STATUS.md`'s session log before this can be trusted, same discipline
   as every other live-UI batch this session.
 - **Plan** (`(tabs)/plan.tsx`, formerly "Train" — **IA redesign Phase 2, 2026-07-16**): a **hub**
   and a **live session** in one tab; the tab file/route is unchanged, only the label and the hub
@@ -1744,7 +1744,7 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   new `HeroGlow` component. **Confirmed visual direction = "Enriched-Calm"** — calm calendar-first
   base + disciplined functional accents (blue dominant, ember=energy/streaks, gold=records/milestones)
   + depth + one soft glow per screen; no wall-to-wall gradients, stock photos, or tactical copy. The
-  design strategy + direction review live in `DESIGN.md` §4; execution plan in `~/.claude/plans/`.
+  design strategy + direction review live in `docs/DESIGN.md` §4; execution plan in `~/.claude/plans/`.
 - **Theme engine:** `src/theme/` — a Zustand store (`useThemeStore`, persisted to the SQLite-backed
   `localStorage`, **default dark**) drives live dark/light switching. Screens read colors via
   `useTheme()` and build styles with `useThemedStyles(makeStyles)` so a mode change re-renders the
@@ -2766,7 +2766,7 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   assert a consistent beginner out-scores a flaky advanced lifter) so the formula is OTA-tunable.
   `social.tsx` renders the trio as a 3-tab board (Weekly Consistency / Streak / Tempo Score) with
   client-side sort (`fetchLeaderboardV2` + `sortLeaderboard`). Full design doc retired (all 4 stages
-  shipped, see `EXECUTION_STATUS.md` session log); the Tempo Score v1 weights it defined, live in
+  shipped, see `docs/EXECUTION_STATUS.md` session log); the Tempo Score v1 weights it defined, live in
   `lib/tempoScore.ts`, are: **Completion 0.35 · Goal adherence 0.25 · Consistency 0.15 · Streak 0.15 ·
   Frequency 0.10**, each a rolling-28-day component — weighted toward *finishing what's scheduled*
   over raw volume so a beginner who completes everything out-scores a flaky advanced lifter.
@@ -2918,7 +2918,7 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   It takes the user's message plus a context pack the app assembled, and returns
   `{ text, action }` where `action` is a **proposed** tool call the app renders as a confirm card;
   the actual write happens client-side through the same lib functions a button press already uses,
-  only after the user taps Apply. Rationale in `STRATEGY_PLANS.md` §B.1 — this avoids a second copy
+  only after the user taps Apply. Rationale in `docs/STRATEGY_PLANS.md` §B.1 — this avoids a second copy
   of the scheduling engine living in Deno, means nothing mutates without a tap, and costs one API
   round-trip per message instead of three or four.
   **Five tools** (`reschedule_week`, `move_workout`, `swap_exercise`, `start_travel_mode`,
@@ -2931,7 +2931,7 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   (founder call 2026-07-23, tightened from 3/week — both tiers now share one month window),
   Pro/dormant = 200/month soft cap; `402` signals the paywall moment. The tighter cap is a product
   lever, not a cost one (a free user costs ~$0.13/month on Opus, ~$0.08 on Sonnet 5) — see
-  `STRATEGY_PLANS.md` §B.6 for the recorded tradeoff: fewer wall-hits means fewer high-intent
+  `docs/STRATEGY_PLANS.md` §B.6 for the recorded tradeoff: fewer wall-hits means fewer high-intent
   paywall moments, so `paywall_shown{context:'tempo_coach'}` conversion is the number that decides
   whether 3/month was too tight. Rows are written only *after*
   a successful reply, so a failed request never burns an allowance. Every call logs input/output
@@ -3185,7 +3185,7 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   `terms.html`, `delete-account.html` (hosted at `fittempo.app/...`). The **privacy policy carries the
   Google API Services "Limited Use" disclosure** required to pass OAuth verification for the sensitive
   `calendar.events` scope. Filled-in submission answers (OAuth verification steps, App Store **App
-  Privacy** + Play **Data safety**) live in `LAUNCH.md` §4; console-upload logos in `brand-assets/`.
+  Privacy** + Play **Data safety**) live in `docs/LAUNCH.md` §4; console-upload logos in `brand-assets/`.
 - **Store assets:** the app icon is a **full-bleed white** 1024² (`icon.png`, alpha stripped →
   Apple-safe), rebuilt from the runner/clock glyph so there is **no black frame**; the Android
   adaptive icon is a white `backgroundColor` + isolated-glyph `foregroundImage` (the accidental
@@ -3195,7 +3195,7 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   white rounded badge shown on the dark splash on both platforms. In-app brand assets:
   `tempo-logo.png` (white-tile badge), `tempo-mark.png` (transparent two-tone glyph), `tempo-glyph.png`
   (white silhouette for `tintColor`). `app.json` carries permission strings + export-compliance flag;
-  `eas.json` has build env + submit scaffold; launch steps in `LAUNCH.md`. **2026-08-30:**
+  `eas.json` has build env + submit scaffold; launch steps in `docs/LAUNCH.md`. **2026-08-30:**
   `submit.production.android` corrected from `track: "alpha"` to `track: "production"` +
   `releaseStatus: "completed"` — the app had been live on Play production since 2026-08-09 while the
   profile still pointed at closed testing, so any non-interactive `eas submit` would have published a
@@ -3204,7 +3204,7 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   `submit.production.ios.ascAppId` added (`6785075737`, the App Store Connect numeric app ID —
   required for `eas submit -p ios --non-interactive` to resolve the app without an interactive
   prompt); the actual first production submissions to both stores happened this session — see
-  `EXECUTION_STATUS.md`'s Session Log for the full App Store Connect / Play Console setup detail
+  `docs/EXECUTION_STATUS.md`'s Session Log for the full App Store Connect / Play Console setup detail
   (category, age rating, App Privacy answers, price tier, subscriptions, and the Play listing's
   stale "Tempo" branding caught and corrected).
 - **Sign in with Apple:** `ios.usesAppleSignIn: true` in `app.json` (the entitlement native Apple
@@ -3218,7 +3218,7 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   **Fixed 2026-08-02:** Apple's native sheet can resolve without an `identityToken` (a documented edge
   case) — this used to fall through silently, leaving the user staring at a vanished spinner with no
   explanation; now alerts explicitly. **Still open, needs founder Apple Developer credentials (queued
-  as N3 in `EXECUTION_STATUS.md`):** `delete-account` never revokes Apple's own authorization, so a
+  as N3 in `docs/EXECUTION_STATUS.md`):** `delete-account` never revokes Apple's own authorization, so a
   "deleted" account still shows Tempo as an authorized app in the user's Apple ID settings — closing
   this needs a Sign in with Apple Service ID + private key from the Apple Developer portal (new infra,
   not just a code change), which only the founder can obtain.
@@ -3281,7 +3281,7 @@ Founder asked to close out everything in the audit that's Sonnet-buildable, not 
   the two genuine gaps: the week/month range's prev/next chevrons (icon-only, no label at all —
   labeled `Previous {week|month}` / `Next {week|month}`, dynamic to the active view mode).
 
-### Paywall rebuild + founding-price plumbing (2026-07-22, PRODUCT_AUDIT.html §24/§25 L3-L8)
+### Paywall rebuild + founding-price plumbing (2026-07-22, docs/PRODUCT_AUDIT.html §24/§25 L3-L8)
 Founder-approved, built alongside the L1/L2 re-gating above so the paywall could sell what actually
 changed. Two classes of work: a real purchase-layer bug fix, and a full visual rebuild.
 - **L3 — `lib/purchases.ts`.** `packageHasIntroOffer` assumed every introductory offer is a FREE
@@ -3332,7 +3332,7 @@ changed. Two classes of work: a real purchase-layer bug fix, and a full visual r
   (live pricing, the offline/no-plans fallback, Restore/Terms/Privacy, every `track()` call, dormant-
   safety, dismissibility) was preserved verbatim from the original file.
 
-### Pro re-gated onto the weekly repetition (2026-07-22, PRODUCT_AUDIT.html §24/§30 L1/L2)
+### Pro re-gated onto the weekly repetition (2026-07-22, docs/PRODUCT_AUDIT.html §24/§30 L1/L2)
 **Founder-approved change to what's free vs. Pro.** Every existing Pro gate (plate calculator, muscle
 map, travel mode, themes, creation caps) was an accessory nobody hits weekly — which is why founder
 instinct said nobody would buy it, correctly. Fix: gate the thing a real user hits every week, because
@@ -3375,7 +3375,7 @@ a calendar changes every week.
 - `proFeatures.ts` gained `rolling_schedule` + `auto_reschedule`; `PAYWALL_POINTS` now leads with
   these two instead of the old accessory-first ordering (kept, just demoted).
 
-### Public share preview (2026-07-22, PRODUCT_AUDIT.html §26 L27)
+### Public share preview (2026-07-22, docs/PRODUCT_AUDIT.html §26 L27)
 A shared workout link used to be a dead end for anyone without a Tempo account: `app/shared-workout.tsx`
 bails out (`if (!code || !userId) return`) before it ever fetches anything, so the app's only organic
 growth loop — "try my workout" — showed nothing to exactly the people it exists to convert. Two real
@@ -3412,7 +3412,7 @@ bugs found and fixed alongside the new page, not just the missing page itself:
   opens the app directly with no browser hop) are the other deliberately deferred half of L27 — they
   need a native rebuild, so they're their own session, not bundled into this OTA-safe change.
 
-### Progress-photo compare (2026-07-22, PRODUCT_AUDIT.html §26 L25)
+### Progress-photo compare (2026-07-22, docs/PRODUCT_AUDIT.html §26 L25)
 `app/progress-photos.tsx` had a timeline grid + single-photo viewer but no way to see two photos
 together — the single most shareable artifact a fitness app can produce, and the app could take
 photos in but never hand anything back out. Added a drag-to-reveal before/after:
@@ -3429,7 +3429,7 @@ photos in but never hand anything back out. Added a drag-to-reveal before/after:
   no rebuild.
 - `analytics.ts` gained `progress_photo_compared`.
 
-### Achievement-unlock celebration (2026-07-22, PRODUCT_AUDIT.html §26 L24)
+### Achievement-unlock celebration (2026-07-22, docs/PRODUCT_AUDIT.html §26 L24)
 `lib/badges.ts`'s 12 badges were purely passive — earned/unearned status only ever appeared if you
 opened the trophy case (`/badges`) yourself; nothing celebrated the moment a badge was actually
 earned. Extended the existing system rather than building a second one: `workout-complete.tsx` now
@@ -3452,7 +3452,7 @@ that exact moment with richer, dedicated copy.
   a separate server RPC and still surface through the trophy case's own existing NEW indicator.
 - `analytics.ts` gained `achievement_unlocked: { key, tier }`.
 
-### Pause / vacation mode (2026-07-22, PRODUCT_AUDIT.html §26 L21)
+### Pause / vacation mode (2026-07-22, docs/PRODUCT_AUDIT.html §26 L21)
 "I'm away for 10 days" used to mean a broken streak and a wall of "missed" sessions — nothing told
 the plan the user was gone. `user_profiles.paused_until` (nullable date, `add_pause_mode.sql`) is
 the only new state. `lib/pauseMode.ts`:
@@ -3901,7 +3901,7 @@ recoverable from git history if it is ever wanted back.
 - **Claims are sourced, not invented.** Free-tier limits and the Pro list come from `lib/proFeatures.ts`
   (`PAYWALL_POINTS`) and `paywall.tsx`'s `COMPARE`, so the site cannot advertise something the app
   doesn't ship, the same App-Store-rejection rule that governs the in-app paywall. Pricing is
-  $4.99/mo · $34.99/yr with the flat $24.99 founding first year (`STRATEGY_PLANS.md` §A, 2026-07-27),
+  $4.99/mo · $34.99/yr with the flat $24.99 founding first year (`docs/STRATEGY_PLANS.md` §A, 2026-07-27),
   described as a **paid intro offer, never a "free trial"**, because that's what it is.
 - **No fabricated social proof.** Star ratings and testimonials are the two things a launch site
   normally invents. Both ship as clearly-marked commented-out blocks (`RATINGS BLOCK` /
@@ -4227,4 +4227,4 @@ regression risk for zero gain. Left alone deliberately, and the reasoning record
 
 ---
 
-*See also `LAUNCH.md` (iOS/Android launch guide) and `CLAUDE.md` (build/run + project conventions).*
+*See also `docs/LAUNCH.md` (iOS/Android launch guide) and `CLAUDE.md` (build/run + project conventions).*
