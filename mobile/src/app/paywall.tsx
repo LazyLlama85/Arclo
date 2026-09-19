@@ -45,6 +45,7 @@ import {
   loadProPlans, purchaseProPackage, restorePurchases, introOffer, checkIntroEligibility,
   type IntroOffer, type IntroEligibilityReason, type ProPlans, type PlansUnavailableReason,
 } from '@/lib/purchases'
+import { billingDisclosure, STORE } from '@/lib/storeCopy'
 import { useEntitlementStore } from '@/stores/entitlements'
 import { track } from '@/lib/analytics'
 import { useAuthStore } from '@/stores/auth'
@@ -60,7 +61,7 @@ type PlanKey = 'annual' | 'monthly'
 // but the real reason still reaches us via the paywall_plans_unavailable event.
 function unavailableMessage(reason: PlansUnavailableReason | null): string {
   if (reason === 'fetch_error') {
-    return 'We couldn’t reach the App Store. Check your connection and try again — if you already subscribed, tap Restore below.'
+    return `We couldn’t reach the ${STORE.name}. Check your connection and try again — if you already subscribed, tap Restore below.`
   }
   return 'Subscriptions aren’t available right now. Try again in a moment — if you already subscribed, tap Restore below.'
 }
@@ -319,9 +320,9 @@ export default function PaywallScreen() {
         { text: 'Great', onPress: () => router.back() },
       ])
     } else if (res.failed) {
-      Alert.alert('Couldn’t check your purchases', 'We couldn’t reach the App Store. Check your connection and try again.')
+      Alert.alert('Couldn’t check your purchases', `We couldn’t reach the ${STORE.name}. Check your connection and try again.`)
     } else {
-      Alert.alert('Nothing to restore', 'We couldn’t find an active subscription on this Apple ID.')
+      Alert.alert('Nothing to restore', `We couldn’t find an active subscription on this ${STORE.account}.`)
     }
   }
 
@@ -659,10 +660,7 @@ export default function PaywallScreen() {
             Privacy
           </Text>
         </View>
-        <Text style={styles.finePrint}>
-          Payment is charged to your Apple ID. Subscriptions renew automatically unless cancelled at
-          least 24 hours before the period ends. Manage or cancel in your App Store settings.
-        </Text>
+        <Text style={styles.finePrint}>{billingDisclosure()}</Text>
       </View>
     </SafeAreaView>
   )

@@ -2279,6 +2279,20 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   a longer sentence silently pushes the block below it into the next one. It immediately caught a
   real 560x45px collision on the 45-minute hook slide, where a `min()` clamp on the art's TOP pulled
   the graphic up into a two-line subtitle. Run it after any copy change.
+- **`lib/storeCopy.ts` (2026-09-19):** platform-correct billing wording. The paywall hardcoded
+  Apple's — "Payment is charged to your Apple ID... Manage or cancel in your App Store settings" —
+  and was shown to Android users too, who are live on Play. Factually wrong on a screen that takes
+  money, and a Play policy problem since Google requires the renewal disclosure to be accurate.
+  `STORE` (account / name / manage) plus `billingDisclosure()` are now the single source, used by the
+  paywall fine print, the plans-unavailable message and both restore alerts. Its own module rather
+  than part of `purchases.ts` **so it can be tested**: purchases.ts reaches the RevenueCat SDK and
+  Sentry, neither of which loads under ts-jest's Node env, which would have left the one string with
+  legal weight as the one string nothing covers. 3 tests.
+- **Account deletion warns about billing (`app/settings.tsx`, 2026-09-19):** the final confirm now
+  tells a Pro user that deleting does NOT cancel their subscription and names where to cancel.
+  Deleting the account cannot stop billing — the store owns it — so without this a subscriber gets
+  charged after deleting, files a chargeback and leaves a one-star review, all deserved. Shown only
+  when `isPro`, so it reads as a warning rather than noise.
 - **The Arclo Coach lifting (`brand-assets/exercise_art.py`, rewritten 2026-09-16):** the exercise
   art is now the app's own mascot (`brand-assets/coach-poses`, reference sheet
   `tempo-coach-reference-sheet.jpeg`) performing each lift. The shipped coach idles, waves, walks,

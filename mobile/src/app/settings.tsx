@@ -38,6 +38,7 @@ import {
 import { scheduleWorkoutReminders, cancelAllReminders, hasReminderPermission } from '@/lib/notifications'
 import { useProAccess, useEntitlementStore } from '@/stores/entitlements'
 import { presentCustomerCenter } from '@/lib/purchases'
+import { STORE } from '@/lib/storeCopy'
 import { useTutorialStore } from '@/stores/tutorial'
 import { T } from '@/lib/tutorial'
 import { OptionSheet } from '@/components/OptionSheet'
@@ -713,7 +714,20 @@ export default function SettingsScreen() {
       <OptionSheet
         visible={deleteAccountStage === 'final'}
         title="Are you absolutely sure?"
-        subtitle="Your account and every workout you’ve logged will be erased immediately. There’s no way to recover it."
+        subtitle={
+          // Deleting the account does NOT cancel the subscription — the store
+          // owns billing, and nothing this app does can stop it. Saying so is
+          // not a legal nicety: a subscriber who deletes their account and then
+          // keeps getting charged files a chargeback and leaves a one-star
+          // review, and both are deserved if we never told them. Only shown to
+          // someone who actually has a subscription, so it is a warning rather
+          // than noise.
+          isPro
+            ? `Your account and every workout you’ve logged will be erased immediately. There’s no way to recover it.
+
+This does NOT cancel your subscription. You’ll keep being charged until you cancel it in ${STORE.manage}.`
+            : 'Your account and every workout you’ve logged will be erased immediately. There’s no way to recover it.'
+        }
         options={[{ key: 'delete', label: 'Delete forever', icon: 'trash-outline', destructive: true }]}
         onSelect={() => { setDeleteAccountStage(null); runDelete() }}
         onClose={() => setDeleteAccountStage(null)}
