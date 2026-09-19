@@ -2302,6 +2302,16 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   than part of `purchases.ts` **so it can be tested**: purchases.ts reaches the RevenueCat SDK and
   Sentry, neither of which loads under ts-jest's Node env, which would have left the one string with
   legal weight as the one string nothing covers. 3 tests.
+- **Legal text is store-aware too (2026-09-19, follow-up):** fixing the paywall was not enough —
+  the **Terms of Use and Privacy Policy said Apple only**, and those are linked straight from the
+  purchase screen, which is exactly where App Review opens them. `constants/legalContent.ts` billing
+  clauses now use `{store}` / `{storeAccount}` / `{storeManage}`, resolved by `fillLegalText` in
+  `lib/storeCopy.ts` (moved out of `app/legal.tsx` so it is testable). Sign-in references to Apple
+  are deliberately left alone: Sign in with Apple is real on both platforms; only the BILLING
+  sentences are platform-specific. `web/terms.html` + `web/privacy.html` are static and serve both
+  platforms, so they name both stores explicitly and now also state that deleting your Arclo account
+  does not cancel the subscription. 3 further tests assert no Apple wording can reach an Android
+  reader, no Google wording an iOS one, and that no placeholder is left unresolved.
 - **Account deletion warns about billing (`app/settings.tsx`, 2026-09-19):** the final confirm now
   tells a Pro user that deleting does NOT cancel their subscription and names where to cancel.
   Deleting the account cannot stop billing — the store owns it — so without this a subscriber gets

@@ -17,6 +17,15 @@
 // The text below is written to be readable, not to be clever. It is not a
 // substitute for counsel reviewing it once before the app has real users.
 
+// Placeholders resolved at render time by app/legal.tsx:
+//   {brand} {email}                       — naming
+//   {store} {storeAccount} {storeManage}  — lib/storeCopy, per platform
+//
+// Billing sentences MUST use the store placeholders. These documents are linked
+// straight from the paywall, which is exactly where App Review looks, and an
+// Android user reading that payment goes to an Apple ID is both wrong and a Play
+// policy problem. This was the same bug the paywall had; the legal copy is the
+// worse place for it.
 export const LEGAL_UPDATED = 'August 2026'
 
 export interface LegalBlock {
@@ -65,7 +74,7 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
         bullets: [
           'Usage analytics (PostHog): which screens you open and which features you use, tied to your account id so we can understand how the app is actually used and improve it.',
           'Crash and diagnostic data (Sentry): crash reports and basic device information when something goes wrong, so it can be fixed.',
-          'Subscription data (RevenueCat and Apple): whether you have an active subscription, which plan, and when it renews. Payment details go to Apple, never to us — we never see your card.',
+          'Subscription data (RevenueCat and {store}): whether you have an active subscription, which plan, and when it renews. Payment details go to {store}, never to us — we never see your card.',
         ],
       },
     ],
@@ -97,7 +106,7 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
           'Apple and Google — sign-in, when you choose those options.',
           'Expo Push, APNs, and FCM — delivering the notifications you opt into.',
           'PostHog — product analytics. Sentry — crash reporting.',
-          'RevenueCat and Apple — managing your subscription and processing payment.',
+          'RevenueCat and {store} — managing your subscription and processing payment.',
         ],
       },
       {
@@ -221,10 +230,10 @@ export const TERMS_SECTIONS: LegalSection[] = [
     title: 'Subscriptions',
     blocks: [
       {
-        p: '{brand} Pro is an auto-renewing subscription sold through Apple. Payment is charged to your Apple ID at confirmation of purchase. It renews automatically unless you cancel at least 24 hours before the end of the current period, and your account is charged for renewal within 24 hours of the period ending.',
+        p: '{brand} Pro is an auto-renewing subscription sold through {store}. Payment is charged to your {storeAccount} at confirmation of purchase. It renews automatically unless you cancel at least 24 hours before the end of the current period, and your account is charged for renewal within 24 hours of the period ending.',
       },
       {
-        p: 'Manage or cancel your subscription in your App Store settings — we cannot cancel it for you. Refunds are handled by Apple under their policies, not by us. Any introductory offer is available once per Apple ID, at Apple’s determination.',
+        p: 'Manage or cancel your subscription in {storeManage} — we cannot cancel it for you. Refunds are handled by {store} under their policies, not by us. Any introductory offer is available once per {storeAccount}, at {store}’s determination.',
       },
     ],
   },
@@ -232,7 +241,7 @@ export const TERMS_SECTIONS: LegalSection[] = [
     title: 'Third-party services',
     blocks: [
       {
-        p: '{brand} depends on third parties to work, including Apple and Google for sign-in, Google Calendar for optional scheduling, Apple for payments, and cloud infrastructure for storage. Your use of those services is governed by their own terms and privacy policies. Google Calendar data is handled per the Google API Services User Data Policy, including its Limited Use requirements, as described in our Privacy Policy.',
+        p: '{brand} depends on third parties to work, including Apple and Google for sign-in, Google Calendar for optional scheduling, {store} for payments, and cloud infrastructure for storage. Your use of those services is governed by their own terms and privacy policies. Google Calendar data is handled per the Google API Services User Data Policy, including its Limited Use requirements, as described in our Privacy Policy.',
       },
     ],
   },

@@ -18,6 +18,7 @@ import {
   PRIVACY_SECTIONS, TERMS_SECTIONS, LEGAL_UPDATED,
   type LegalSection, type LegalBlock,
 } from '@/constants/legalContent'
+import { fillLegalText } from '@/lib/storeCopy'
 import { useTheme, useThemedStyles, type Palette } from '@/theme'
 
 
@@ -25,8 +26,9 @@ const UPDATED = LEGAL_UPDATED
 const SUPPORT_EMAIL = BRAND_SUPPORT_EMAIL
 
 /** Placeholders live in the content module so a brand rename can't strand a
- *  stale name inside a legal document. */
-const fill = (t: string) => t.replace(/\{brand\}/g, BRAND_NAME).replace(/\{email\}/g, SUPPORT_EMAIL)
+ *  stale name inside a legal document; the substitution itself lives in
+ *  lib/storeCopy so the store-specific half is unit-tested. */
+const fill = fillLegalText
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   const styles = useThemedStyles(makeStyles)

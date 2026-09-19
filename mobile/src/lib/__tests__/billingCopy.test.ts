@@ -67,3 +67,50 @@ describe('billing disclosure', () => {
     }
   })
 })
+
+
+// ── The legal documents, which matter more than the paywall ──────────────────
+//
+// Terms and Privacy are linked straight from the purchase screen, which is where
+// App Review opens them. The paywall's Apple-only wording was fixed first; the
+// same sentences existed here, in the documents the user actually agrees to.
+describe('legal text', () => {
+  const { PRIVACY_SECTIONS, TERMS_SECTIONS } = require('@/constants/legalContent')
+
+  const allText = (fill: (t: string) => string) => {
+    const out: string[] = []
+    const walk = (blocks: any[]) => {
+      for (const b of blocks ?? []) {
+        if (typeof b?.p === 'string') out.push(fill(b.p))
+        if (typeof b?.sub === 'string') out.push(fill(b.sub))
+        for (const li of b?.list ?? []) if (typeof li === 'string') out.push(fill(li))
+      }
+    }
+    for (const sec of [...PRIVACY_SECTIONS, ...TERMS_SECTIONS]) walk(sec.blocks)
+    return out.join(String.fromCharCode(10))
+  }
+
+  it('never tells an Android user to cancel in the App Store', () => {
+    const text = allText(loadFor('android').fillLegalText)
+    expect(text).toContain('Google Play')
+    expect(text).toMatch(/Manage or cancel your subscription in your Google Play subscriptions/)
+    // "Sign in with Apple" is a real Android-available feature and is allowed to
+    // stay; the billing sentences are what must never say Apple.
+    expect(text).not.toMatch(/Apple ID/)
+    expect(text).not.toMatch(/App Store settings/)
+  })
+
+  it('still says Apple on iOS', () => {
+    const text = allText(loadFor('ios').fillLegalText)
+    expect(text).toContain('Apple ID')
+    expect(text).toContain('your App Store settings')
+    expect(text).not.toContain('Google Play account')
+  })
+
+  it('leaves no unresolved placeholders', () => {
+    for (const os of ['ios', 'android'] as const) {
+      const text = allText(loadFor(os).fillLegalText)
+      expect(text).not.toMatch(/\{(brand|email|store|storeAccount|storeManage)\}/)
+    }
+  })
+})
