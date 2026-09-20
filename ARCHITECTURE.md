@@ -2293,6 +2293,21 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   Magnitude rather than signed average so a series straddling zero does not collapse the span.
   For the founder's 10 lb at ~180 lb the line now occupies ~30% of the chart height instead of 100%.
   `minSpanRatio={0}` restores the old behaviour per caller. 12 tests.
+- **`lib/defaultStartTime.ts` (2026-09-20):** a manually added workout can no longer default to a
+  time that has already passed. Founder: "if you click + and add a workout it shouldn't just
+  schedule for 7am that's already past." Everything behind the **+** routes to `workout-builder`,
+  which opened on a hardcoded `'07:00:00'`. It does ask `reschedule.suggestTimeOnDate` for something
+  calendar-aware — and that IS now-aware — but the call is **async and can legitimately return
+  null** (no free window left, no calendar access, a failed fetch), and in every one of those the
+  hardcoded value stayed. It also flashed 07:00 for the moment before the suggestion resolved, which
+  is long enough to tap Save. `defaultStartTime` is the synchronous floor underneath the suggestion,
+  not a replacement: a future day keeps the preferred time, today takes the later of preferred and
+  "now + 30 min rounded up to :15", and past roughly 21:30 it proposes the day's latest rather than
+  23:45. Compares against the **local** date, since a UTC comparison would call a late local evening
+  "a future day" and hand back 07:00 — the same bug through the back door. Wired at three points in
+  the builder (initial state, day change, and the null/throw branches), with `timeTouched` still
+  winning everywhere. Quick Workout was checked and was never affected: it starts "now" by
+  construction. 12 tests.
 - **`lib/storeCopy.ts` (2026-09-19):** platform-correct billing wording. The paywall hardcoded
   Apple's — "Payment is charged to your Apple ID... Manage or cancel in your App Store settings" —
   and was shown to Android users too, who are live on Play. Factually wrong on a screen that takes

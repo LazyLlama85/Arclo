@@ -20,6 +20,7 @@ import { useAuthStore } from '@/stores/auth'
 import { PressableScale } from '@/components/motion'
 import { scheduleWorkoutReminders, requestPermissions } from '@/lib/notifications'
 import { suggestTimeOnDate } from '@/lib/reschedule'
+import { defaultStartTime } from '@/lib/defaultStartTime'
 import { useWeightUnit, unitLabel, toInputString, inputToLbs, type WeightUnit } from '@/lib/units'
 import { ExercisePickerSheet } from '@/components/ExercisePickerSheet'
 import { ExerciseThumb } from '@/components/ExerciseThumb'
@@ -65,7 +66,11 @@ export default function WorkoutBuilderScreen() {
   const [items, setItems] = useState<DraftItem[]>([])
   const [pickerOpen, setPickerOpen] = useState(false)
   const [scheduleDate, setScheduleDate] = useState<string>(date ?? toDateStr(new Date()))
-  const [time, setTime] = useState('07:00:00')
+  // Never a past time. The calendar-aware suggestion below is better when it
+  // works, but it is async and can legitimately come back null (no free window
+  // left, no calendar access, a failed fetch). This is the floor underneath it,
+  // computed synchronously so there is nothing to wait for and nothing to flash.
+  const [time, setTime] = useState(() => defaultStartTime(date ?? toDateStr(new Date())))
   const [showTime, setShowTime] = useState(false)
   // Smart pre-fill: the same free-slot engine auto-scheduling uses suggests a time
   // for the chosen day. A manually picked time always wins and is never overwritten.
@@ -125,13 +130,20 @@ export default function WorkoutBuilderScreen() {
   useEffect(() => {
     if (!scheduling || !userId) return
     let stale = false
+    // Re-floor immediately for the newly chosen day, so switching from tomorrow
+    // back to today can never leave yesterday's morning slot sitting in the
+    // field while the suggestion is in flight.
+    if (!timeTouched) setTime(defaultStartTime(scheduleDate))
     suggestTimeOnDate(supabase, userId, scheduleDate, estMin || 45)
       .then((s) => {
         if (stale) return
         setSuggestedTime(s?.start_time ?? null)
-        if (s && !timeTouched) setTime(s.start_time)
+        if (timeTouched) return
+        // A null suggestion means the engine found nothing, not that 7am is
+        // fine. Fall back to the floor rather than whatever was already there.
+        setTime(s ? s.start_time : defaultStartTime(scheduleDate))
       })
-      .catch(() => {})
+      .catch(() => { if (!stale && !timeTouched) setTime(defaultStartTime(scheduleDate)) })
     return () => { stale = true }
   // estMin/timeTouched deliberately aren't deps — re-suggest per day, not per keystroke.
   // eslint-disable-next-line react-hooks/exhaustive-deps
