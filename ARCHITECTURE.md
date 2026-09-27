@@ -2001,6 +2001,63 @@ spinner is now reserved only for tight in-button saving states. All motion honor
   recovery map) and `fitnessInsights.ts` (ab work counted as quadriceps volume);
   `exerciseSearch.ts` already matched on the dominant muscle and needed no change.
 
+- **Quick Workout: areas are balanced, not flattened (`lib/quickWorkout.ts`, 2026-09-27):**
+  Target Area is multi-select, but the screen flattened every selected chip into ONE
+  `targetMuscles` union and the engine allocated slots by **movement pattern** over that union.
+  Founder: *"if you select core arms and other stuff, it gives mostly core and some random
+  exercises."* Four separate defects, all fixed:
+  1. **One tier for the whole union.** `filterByMuscle` resolved dominant-or-loose *once* across
+     every selected area, so an area with no dominant match for the user's equipment contributed
+     **nothing, silently**, while a well-stocked one filled the session — and Core has the most
+     bodyweight staples in the catalogue. `QuickContext.targetAreaKeys` now carries the tapped
+     chips, `resolveTargetAreas()` turns them into one `AreaSpec` each, and `poolForArea()`
+     resolves **each area's own tier** independently (group+dominant → dominant → loose).
+  2. **Patterns aren't areas.** Arms owns push + pull, Legs owns squat + hinge, Core owns one, so
+     a pattern round-robin hands out unequal shares — and `forcePatterns` was
+     `new Set(pool.map(e => e.movement_pattern))`, i.e. **raw table order**, so which area got
+     the extra share was decided by nothing. `selectBalanced()` replaces it: round-robin across
+     areas (even shares, `seed`-rotated so a short window doesn't always favour the first chip),
+     and **within** each area cycle its own patterns — so Arms alternates push/pull rather than
+     stacking three curls, and Legs alternates squat/hinge. The result is then re-sorted by the
+     purpose's pattern priority, because interleaving is the right way to *allocate* a session
+     and the wrong way to *perform* one (curls before squats).
+  3. **Schedule avoidance overrode an explicit request.** `getScheduleRestrictions` is applied
+     via `avoidPatterns`, which `matchesConstraints` enforces **before** any muscle filter — so
+     with Push scheduled today and Legs tomorrow (push, squat and hinge all avoided) an explicit
+     "Legs + Arms + Core" request *literally could not return a leg exercise*. New
+     `composeRestrictions(injury, schedule, explicitTarget)` makes the split explicit: injuries
+     are a constraint and always apply; schedule avoidance is a **preference** about what Arclo
+     picks on the user's behalf, so it only applies to "Pick for me" and route-driven
+     suggestions. The `getScheduleRestrictions` floor also rose from "zero resistance patterns
+     left" to **fewer than two** — "Push today, Legs tomorrow" left only `pull`, which did not
+     trip the old floor and collapsed the pool to core plus a couple of curls, the same bug with
+     one pattern of camouflage.
+  4. **The Cardio chip was inert when combined with a muscle chip**, because `forcePatterns`
+     replaced the very priority list that `ctx.targetPattern` fed. Cardio is now promoted to an
+     area of its own whenever a muscle area is also selected (on its own it keeps the original
+     pattern-priority path untouched), and a pattern-based area always allows its own pattern
+     regardless of purpose — tapping Cardio is an explicit request, not a nudge.
+  Two supporting changes: **`exercises.muscle_group`** (the catalogue's own grouping column, from
+  `add_exercise_library_v2.sql`) is now selected and used to *refine* area membership — it
+  removes false positives a dominant-muscle match still lets through (Dumbbell Pullover is
+  `primary_muscles[0] = 'chest'` but `muscle_group = 'back'`; every stretch keeps the muscle it
+  stretches as its dominant one but is filed under `mobility`). It **refines** and never replaces
+  `muscles`: replacing would readmit Hyperextension (`muscle_group = 'back'`) into "Upper Body",
+  and `mobility` is allowed in for the low-impact purposes so a "Legs Mobility" request still
+  gets leg stretches. A row with no `muscle_group` is never filtered out by it. **"Upper Body"**
+  gains `subAreas` (chest / upper back / shoulders / arms) so it can't come back as
+  chest/lats/chest/lats with no shoulders or arms; the sub-areas are spelled out rather than
+  reusing the "Back" chip, which includes `LOWER_BACK_MUSCLES` that Upper Body must exclude.
+  Pool **widening** to the full library is now decided per area rather than per whole pool, since
+  with several areas selected it is normal for one to be stocked and another thin, and the old
+  whole-pool test let the stocked one hide the thin one. Finally, when a requested area lands
+  nothing anywhere, the session still falls back to full body (a workout is always produced) but
+  the **title drops the area name** — "40-Minute Arms Muscle" full of squats is a lie about what
+  is in it. Covered by `lib/__tests__/quickWorkoutAreaBalance.test.ts` (27 cases); 5 of them fail
+  with the engine reverted, and the whole existing Quick Workout suite (`…TargetArea`,
+  `…TargetAreaFidelity`, `…PoolWidening`, `…PlanBacked`, `…Duration`, `…Familiarity`) still
+  passes unchanged.
+
 - **OTA update delivery (`lib/otaUpdates.ts`, added 2026-09-03):** the app never called
   `expo-updates` at all, leaving delivery to the library's passive default — check on cold
   start, download in the background, apply on the NEXT cold start. On iOS an app stays warm

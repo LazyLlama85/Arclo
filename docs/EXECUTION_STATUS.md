@@ -18,6 +18,51 @@
 
 ## ▶ CURRENT FOCUS *(the resume point)*
 
+**2026-09-27 — Quick Workout: multi-select Target Areas are now balanced, not flattened.**
+
+Founder, with the report that named it exactly: *"it gives so many random exercises that aren't
+balanced to the selected muscle groups. If you select core arms and other stuff, it gives mostly core
+and some random exercises."* Four independent defects, all in `lib/quickWorkout.ts` + the screen's
+restriction composition — full detail in `ARCHITECTURE.md`:
+
+1. **One match tier for the whole union.** Every selected chip was flattened into one
+   `targetMuscles` array and dominant-or-loose was resolved *once* across it, so an area with no
+   dominant match for the user's equipment contributed **nothing, silently**, while a well-stocked
+   area filled the session — and Core has the most bodyweight staples in the catalogue. Each area
+   now resolves its own tier (`resolveTargetAreas` → `poolForArea`).
+2. **Slots were allocated by movement pattern, and patterns aren't areas.** Arms owns push+pull,
+   Legs squat+hinge, Core one — and the pattern list came from **raw table order**, so which area
+   got the extra share was decided by nothing. `selectBalanced()` round-robins across areas and
+   cycles each area's own patterns (Arms gets biceps AND triceps; Legs quads AND hamstrings), then
+   re-sorts by pattern priority so compounds still lead.
+3. **Schedule avoidance overrode the user's explicit request** — and was applied *before* the muscle
+   filter, so with Push today and Legs tomorrow an explicit "Legs + Arms + Core" request literally
+   could not return a leg exercise. This is the cause that actually produced the reported session.
+   `composeRestrictions()` now makes the split explicit: injuries always apply, schedule avoidance
+   only when Arclo is the one choosing. The floor in `getScheduleRestrictions` also rose from "zero
+   resistance patterns left" to **fewer than two** — "Push today, Legs tomorrow" left only `pull`,
+   which didn't trip the old floor and collapsed the pool to core plus curls.
+4. **The Cardio chip was inert when combined with a muscle chip** (`forcePatterns` discarded the
+   priority list `targetPattern` fed). Cardio is now an area of its own alongside muscle areas.
+
+Also: `exercises.muscle_group` (already in the schema, never used by the engine) now **refines** area
+membership — it removes a back-filed pullover from Chest and files stretches under mobility — without
+replacing the muscle rule, which would readmit Hyperextension into "Upper Body"; "Upper Body" gains
+sub-areas so it can't come back with no shoulders or arms; pool widening is decided per area; and a
+request that lands nothing still produces a full-body session but **stops claiming the area in the
+title**.
+
+**Verified:** `npx tsc --noEmit` clean, **696 tests / 66 suites pass**. New
+`lib/__tests__/quickWorkoutAreaBalance.test.ts` (27 cases) confirmed **non-vacuous** by reverting the
+engine and watching 5 fail. Every pre-existing Quick Workout suite passes unchanged. **No migration
+needed** — `muscle_group` ships with `add_exercise_library_v2.sql`.
+
+**⚠ NOT YET VERIFIED ON A DEVICE, AND NOT YET DELIVERED.** JS-only, so it ships by OTA
+(`eas update`), but no user has it until that runs. The untested part is the one tests can't cover:
+tapping several chips on the real screen and reading the session back.
+
+---
+
 **2026-09-14 — rotation shift built (plan path), and a live split duplication bug fixed.**
 
 **What shipped (engine + Home wiring, `tsc` clean, 608 tests):**
@@ -915,6 +960,13 @@ them).
 ---
 
 ## Session Log *(newest first, one entry per session — full detail always in `git log` + `ARCHITECTURE.md`)*
+
+- **2026-09-27** — Quick Workout multi-select Target Areas fixed: areas are now balanced per area
+  instead of flattened into one muscle union and allocated by movement pattern. Four causes
+  (single-tier union silencing thin areas, pattern-order-by-table-order, schedule avoidance
+  overriding an explicit request, inert Cardio chip); `muscle_group` now refines membership,
+  "Upper Body" split into sub-areas. 696 tests pass; new suite verified non-vacuous (5 fail on the
+  old engine). JS-only — needs an OTA and a device check.
 
 - **2026-09-09** — Health check: scheduling enforcement holding (0/307 unmakeable), iOS adoption
   25→3 on pre-fix JS, no Quick Workout regressions. Found Arclo's PostHog project is shared with

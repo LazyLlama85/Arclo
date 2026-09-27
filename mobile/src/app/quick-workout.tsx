@@ -17,6 +17,7 @@ import {
   generateQuickWorkout, persistQuickWorkout, getProfileForQuick,
   getScheduleRestrictions, injuriesToRestrictions,
   goalToPurpose, snapToQuickMinutes, QUICK_DURATIONS, PURPOSE_META, TARGET_AREA_OPTIONS,
+  composeRestrictions,
   type QuickMinutes, type QuickPurpose, type QuickWorkout, type ProfileForQuick, type MovementPattern,
   type QuickRestrictions, type TargetAreaOption,
 } from '@/lib/quickWorkout'
@@ -110,7 +111,11 @@ export default function QuickWorkoutScreen() {
   // already picked a purpose so that choice isn't hidden from the user.
   const [moreOpen, setMoreOpen] = useState(!!params.purpose)
   const profileRef = useRef<ProfileForQuick | null>(null)
-  const restrictionsRef = useRef<QuickRestrictions | null>(null)
+  // Cached separately rather than pre-merged: injuries always apply, schedule
+  // avoidance only applies when Tempo is the one choosing. See the composition
+  // in regenerate() below for why.
+  const injuryRestrictionsRef = useRef<QuickRestrictions | null>(null)
+  const scheduleRestrictionsRef = useRef<QuickRestrictions | null>(null)
   // Guards against overlapping regenerate() calls resolving out of order — e.g.
   // dragging the duration slider back and forth fires a new regenerate() before
   // an earlier one's Supabase round trip has returned. Without this, whichever
@@ -144,6 +149,7 @@ export default function QuickWorkoutScreen() {
   const regenerate = useCallback(async (
     m: QuickMinutes, p: QuickPurpose | null, equipOverride: Equipment[] | null,
     tp: MovementPattern | undefined, tm: string[] | undefined, al: string | null,
+    ak: string[],
   ) => {
     if (!userId) return
     const requestId = ++requestIdRef.current
@@ -156,24 +162,41 @@ export default function QuickWorkoutScreen() {
       // A selected preset overrides the profile's equipment for this session.
       const base = profileRef.current
       const profile = equipOverride ? { ...base, equipment: equipOverride } : base
-      // Merge injury avoidance with schedule awareness (fetched once): skip what's
-      // scheduled soon (don't pre-empt tomorrow's leg day) or was just trained.
-      if (!restrictionsRef.current) {
-        const injuryR = injuriesToRestrictions(base.injuries)
-        const schedR = await getScheduleRestrictions(supabase, userId)
-        restrictionsRef.current = {
-          avoidMuscles: [...new Set([...injuryR.avoidMuscles, ...schedR.avoidMuscles])],
-          avoidPatterns: [...new Set([...injuryR.avoidPatterns, ...schedR.avoidPatterns])],
-        }
+      injuryRestrictionsRef.current ??= injuriesToRestrictions(base.injuries)
+      const injuryR = injuryRestrictionsRef.current
+      // Schedule awareness — skip what's scheduled soon (don't pre-empt tomorrow's
+      // leg day) or was just trained — applies ONLY when the user has not named a
+      // Target Area.
+      //
+      // It is a preference about what Tempo should choose on the user's behalf,
+      // and it was being applied as a hard constraint on top of what the user had
+      // explicitly asked for. getScheduleRestrictions avoids the patterns of every
+      // session from yesterday to +2 days, so someone training most days has push,
+      // squat and hinge avoided — and since generateQuickWorkout applies
+      // avoidPatterns BEFORE any muscle filter, an explicit "Legs + Arms + Core"
+      // request literally could not return a leg exercise. What came back was
+      // core plus whatever pattern survived, i.e. the founder's "mostly core and
+      // some random exercises" (2026-09-27).
+      //
+      // Injuries are a genuine constraint and still apply either way.
+      const explicitTarget = ak.length > 0
+      if (!explicitTarget) {
+        scheduleRestrictionsRef.current ??= await getScheduleRestrictions(supabase, userId)
       }
-      const restrictions = restrictionsRef.current
+      const restrictions = composeRestrictions(
+        injuryR, scheduleRestrictionsRef.current, explicitTarget,
+      )
       // If the requested target (e.g. a missed "leg day" route param) is now
       // avoided because it's scheduled soon, drop it.
       const effectiveTarget = tp && restrictions.avoidPatterns.includes(tp) ? undefined : tp
       const effectivePurpose = p ?? goalToPurpose(profile.goal)
       const w = await generateQuickWorkout(
         supabase, userId,
-        { minutes: m, purpose: effectivePurpose, targetPattern: effectiveTarget, targetMuscles: tm, targetAreaLabel: al, daysSinceTrained, fromCalendarGap, restrictions },
+        {
+          minutes: m, purpose: effectivePurpose, targetPattern: effectiveTarget,
+          targetMuscles: tm, targetAreaKeys: ak, targetAreaLabel: al,
+          daysSinceTrained, fromCalendarGap, restrictions,
+        },
         profile,
       )
       // A newer regenerate() call started while this one was still in flight —
@@ -197,18 +220,18 @@ export default function QuickWorkoutScreen() {
 
   // Pre-generate on open so a Start button is ready immediately (<10s to start).
   useEffect(() => {
-    regenerate(minutes, purpose, null, targetPattern, targetMuscles, targetAreaLabel)
+    regenerate(minutes, purpose, null, targetPattern, targetMuscles, targetAreaLabel, [...selectedAreaKeys])
   }, [regenerate]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentEquip = () => selectedPreset?.equipment ?? null
   const handlePickMinutes = (m: QuickMinutes) => {
     setMinutes(m)
-    regenerate(m, purpose, currentEquip(), targetPattern, targetMuscles, targetAreaLabel)
+    regenerate(m, purpose, currentEquip(), targetPattern, targetMuscles, targetAreaLabel, [...selectedAreaKeys])
   }
   const handlePickPurpose = (p: QuickPurpose) => {
     const next = p === purpose ? null : p
     setPurpose(next)
-    regenerate(minutes, next, currentEquip(), targetPattern, targetMuscles, targetAreaLabel)
+    regenerate(minutes, next, currentEquip(), targetPattern, targetMuscles, targetAreaLabel, [...selectedAreaKeys])
   }
   // Target Area is multi-select: tapping a chip toggles it in/out of
   // selectedAreaKeys rather than replacing a single selection. "Pick for me"
@@ -220,7 +243,7 @@ export default function QuickWorkoutScreen() {
       areaKeysRef.current = new Set()
       setSelectedAreaKeys(new Set())
       setRouteTargetPattern(undefined)
-      regenerate(minutes, purpose, currentEquip(), undefined, undefined, null)
+      regenerate(minutes, purpose, currentEquip(), undefined, undefined, null, [])
       return
     }
     setRouteTargetPattern(undefined)
@@ -230,12 +253,12 @@ export default function QuickWorkoutScreen() {
     areaKeysRef.current = next
     setSelectedAreaKeys(next)
     const { pattern, muscles, label } = computeTargetFromKeys(next, undefined)
-    regenerate(minutes, purpose, currentEquip(), pattern, muscles, label)
+    regenerate(minutes, purpose, currentEquip(), pattern, muscles, label, [...next])
   }
   const handlePickPreset = (id: string | null) => {
     setSelectedPresetId(id)
     const pr = id ? presets.find((p) => p.id === id) ?? null : null
-    regenerate(minutes, purpose, pr?.equipment ?? null, targetPattern, targetMuscles, targetAreaLabel)
+    regenerate(minutes, purpose, pr?.equipment ?? null, targetPattern, targetMuscles, targetAreaLabel, [...selectedAreaKeys])
   }
   const handleSavePreset = async (preset: EquipmentPreset) => {
     const next = presets.some((p) => p.id === preset.id)
@@ -244,14 +267,14 @@ export default function QuickWorkoutScreen() {
     setPresets(next)
     setPresetSheet({ open: false, edit: null })
     setSelectedPresetId(preset.id)
-    regenerate(minutes, purpose, preset.equipment, targetPattern, targetMuscles, targetAreaLabel)
+    regenerate(minutes, purpose, preset.equipment, targetPattern, targetMuscles, targetAreaLabel, [...selectedAreaKeys])
     await savePresets(supabase, userId, next)
   }
   const handleDeletePreset = async (id: string) => {
     const next = presets.filter((p) => p.id !== id)
     setPresets(next)
     setPresetSheet({ open: false, edit: null })
-    if (selectedPresetId === id) { setSelectedPresetId(null); regenerate(minutes, purpose, null, targetPattern, targetMuscles, targetAreaLabel) }
+    if (selectedPresetId === id) { setSelectedPresetId(null); regenerate(minutes, purpose, null, targetPattern, targetMuscles, targetAreaLabel, [...selectedAreaKeys]) }
     await savePresets(supabase, userId, next)
   }
 

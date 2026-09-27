@@ -76,6 +76,18 @@ export interface QuickContext {
   purpose?: QuickPurpose          // defaults from the user's goal
   targetPattern?: MovementPattern // e.g. a missed "leg day" → bias squat/hinge (route-driven)
   targetMuscles?: string[]        // e.g. "Arms" tapped in the Quick Workout screen (user-driven)
+  /**
+   * The Target Area chip keys the user actually tapped, e.g. ['core','arms','legs'].
+   * `targetMuscles` is the FLATTENED union of these and is kept as the filter of
+   * last resort, but a union cannot be balanced: it can't say how many exercises
+   * each selected area should get, and it lets one area's matches stand in for
+   * another's. See selectBalanced below — this is what makes "Core + Arms + Legs"
+   * return core AND arms AND legs instead of mostly core (founder, 2026-09-27).
+   *
+   * Optional: a caller that only has muscles (or a single area) still works, and
+   * is treated as one anonymous area.
+   */
+  targetAreaKeys?: string[]
   /** "Legs" / "Chest & Back" — the human-readable Target Area selection, for
    *  the title only (buildTitle below). The screen computes this from
    *  TARGET_AREA_OPTIONS' own labels, since targetMuscles alone (raw muscle
@@ -124,17 +136,67 @@ export interface TargetAreaOption {
   pattern?: MovementPattern
   /** "Pick for me" — no filter at all, Tempo's normal purpose-driven pick. Always first. */
   surprise?: boolean
+  /**
+   * `exercises.muscle_group` values this area owns — the catalogue's own
+   * purpose-built grouping column (add_exercise_library_v2.sql), which the
+   * engine ignored until now. It REFINES `muscles`; it never replaces it.
+   *
+   * Intersecting the two is what removes the false positives a dominant-muscle
+   * match alone still lets through: Dumbbell Pullover is `primary_muscles[0] =
+   * 'chest'` but `muscle_group = 'back'`, and every stretch in the catalogue is
+   * `muscle_group = 'mobility'` while keeping the muscle it stretches as its
+   * dominant one ("Lying (side) Quads Stretch" → quads). Replacing `muscles`
+   * with this would go the other way and readmit things: Hyperextension is
+   * `muscle_group = 'back'`, and "Upper Body" is deliberately built to exclude
+   * lower-back work (see UPPER_BACK_MUSCLES above).
+   *
+   * A row with no `muscle_group` at all is never filtered out by this.
+   */
+  groups?: string[]
+  /**
+   * Areas that are really several areas in one. "Upper Body" has to cover
+   * chest, back, shoulders AND arms; with a single pool, slot allocation is by
+   * movement pattern, so a 60-minute Upper Body could come back as chest/lats/
+   * chest/lats and never touch shoulders or arms. Splitting it lets the
+   * balancer give each sub-area its own share.
+   *
+   * Spelled out rather than referencing the 'back' chip on purpose: that chip
+   * includes LOWER_BACK_MUSCLES, which Upper Body must not.
+   */
+  subAreas?: AreaSpec[]
+}
+
+/**
+ * One balanced share of a session. Either a muscle-based area (`muscles`, plus
+ * optional `groups` refinement) or a pattern-based one (`pattern`, i.e. Cardio,
+ * where "muscle group" isn't the right idea at all).
+ */
+export interface AreaSpec {
+  key: string
+  muscles?: string[]
+  groups?: string[]
+  pattern?: MovementPattern
 }
 
 export const TARGET_AREA_OPTIONS: TargetAreaOption[] = [
   { key: 'surprise', label: 'Pick for me', icon: 'shuffle-outline', surprise: true },
-  { key: 'arms', label: 'Arms', icon: 'barbell-outline', muscles: ARM_MUSCLES },
-  { key: 'chest', label: 'Chest', icon: 'shirt-outline', muscles: CHEST_MUSCLES },
-  { key: 'back', label: 'Back', icon: 'body-outline', muscles: BACK_MUSCLES },
-  { key: 'shoulders', label: 'Shoulders', icon: 'triangle-outline', muscles: SHOULDER_MUSCLES },
-  { key: 'upper_body', label: 'Upper Body', icon: 'man-outline', muscles: [...CHEST_MUSCLES, ...UPPER_BACK_MUSCLES, ...SHOULDER_MUSCLES, ...ARM_MUSCLES] },
-  { key: 'legs', label: 'Legs', icon: 'walk-outline', muscles: LEG_MUSCLES },
-  { key: 'core', label: 'Core', icon: 'disc-outline', muscles: CORE_MUSCLES },
+  { key: 'arms', label: 'Arms', icon: 'barbell-outline', muscles: ARM_MUSCLES, groups: ['arms'] },
+  { key: 'chest', label: 'Chest', icon: 'shirt-outline', muscles: CHEST_MUSCLES, groups: ['chest'] },
+  { key: 'back', label: 'Back', icon: 'body-outline', muscles: BACK_MUSCLES, groups: ['back'] },
+  { key: 'shoulders', label: 'Shoulders', icon: 'triangle-outline', muscles: SHOULDER_MUSCLES, groups: ['shoulders'] },
+  {
+    key: 'upper_body', label: 'Upper Body', icon: 'man-outline',
+    muscles: [...CHEST_MUSCLES, ...UPPER_BACK_MUSCLES, ...SHOULDER_MUSCLES, ...ARM_MUSCLES],
+    groups: ['chest', 'back', 'shoulders', 'arms'],
+    subAreas: [
+      { key: 'upper_body.chest', muscles: CHEST_MUSCLES, groups: ['chest'] },
+      { key: 'upper_body.back', muscles: UPPER_BACK_MUSCLES, groups: ['back'] },
+      { key: 'upper_body.shoulders', muscles: SHOULDER_MUSCLES, groups: ['shoulders'] },
+      { key: 'upper_body.arms', muscles: ARM_MUSCLES, groups: ['arms'] },
+    ],
+  },
+  { key: 'legs', label: 'Legs', icon: 'walk-outline', muscles: LEG_MUSCLES, groups: ['legs', 'glutes'] },
+  { key: 'core', label: 'Core', icon: 'disc-outline', muscles: CORE_MUSCLES, groups: ['core'] },
   { key: 'cardio', label: 'Cardio', icon: 'heart-outline', pattern: 'cardio' },
 ]
 
@@ -238,6 +300,10 @@ interface ExerciseRow {
   experience_level: string
   is_core?: boolean | null
   popularity?: number | null
+  /** The catalogue's own grouping column — 'arms' | 'back' | 'core' | 'chest' |
+   *  'shoulders' | 'legs' | 'glutes' | 'cardio' | 'mobility'. Optional because
+   *  user-created exercises and older rows may not carry one. */
+  muscle_group?: string | null
 }
 
 const EXPERIENCE_ORDER: Experience[] = ['beginner', 'intermediate', 'advanced']
@@ -466,6 +532,210 @@ function selectExercises(
   return { exercises: chosen, estimatedSeconds: spent }
 }
 
+// ── Area-balanced selection ─────────────────────────────────────────────────
+//
+// Founder, 2026-09-27: "if you select core arms and other stuff, it gives mostly
+// core and some random exercises."
+//
+// Correct, and it was structural, not a tuning problem. Target Area is
+// multi-select, but the screen flattened every selected chip into ONE
+// `targetMuscles` union and the engine allocated slots by MOVEMENT PATTERN over
+// that union. Three consequences, all of them the reported bug:
+//
+//  1. One tier for the whole union. `filterByMuscle` resolved dominant-or-loose
+//     ONCE across every selected area, so an area with no dominant match for the
+//     user's equipment (no-equipment Arms has no curls) contributed nothing at
+//     all — while Core, which has the most bodyweight staples in the catalogue,
+//     filled the session. Each area now resolves its own tier independently.
+//  2. Patterns aren't areas. Arms owns two patterns (push + pull), Legs two
+//     (squat + hinge), Core one — so a pattern round-robin hands out unequal
+//     shares, and `forcePatterns` was built from `new Set(pool.map(...))`, i.e.
+//     raw table order, so WHICH area got the extra share was decided by nothing.
+//  3. Nothing counted per-area coverage, so nothing guaranteed each selected
+//     area appeared at all.
+//
+// This selector allocates by area first and pattern second: round-robin across
+// the selected areas (so the shares are even), and within each area cycle ITS
+// OWN patterns (so Arms alternates push/pull rather than stacking three curls,
+// and Legs alternates squat/hinge rather than three squats).
+
+interface AreaSlot {
+  key: string
+  byPattern: Record<string, ExerciseRow[]>
+  /** This area's own patterns, in the order its picks should cycle through. */
+  order: MovementPattern[]
+  /** How many exercises this area has contributed so far. */
+  picks: number
+}
+
+/**
+ * Turn the tapped chips into the areas to balance across.
+ *
+ * "Pick for me" (`surprise`) is a reset, not an area, so it is skipped. Cardio
+ * is only promoted to an area of its own when a muscle area is also selected:
+ * on its own it keeps the original pattern-priority path untouched. Combined
+ * with a muscle area it previously did nothing at all, because `forcePatterns`
+ * replaced the very priority list that `ctx.targetPattern` feeds.
+ *
+ * With no keys at all, a bare `targetMuscles` is treated as one anonymous area,
+ * which is exactly the old single-area behaviour.
+ */
+export function resolveTargetAreas(
+  keys: string[] | undefined,
+  targetMuscles: string[] | undefined,
+): AreaSpec[] {
+  if (keys?.length) {
+    const out: AreaSpec[] = []
+    const seen = new Set<string>()
+    const add = (a: AreaSpec) => { if (!seen.has(a.key)) { seen.add(a.key); out.push(a) } }
+    const hasMuscleArea = keys.some(k => {
+      const o = TARGET_AREA_OPTIONS.find(x => x.key === k)
+      return !!o?.muscles && !o.surprise
+    })
+    for (const k of keys) {
+      const opt = TARGET_AREA_OPTIONS.find(o => o.key === k)
+      if (!opt || opt.surprise) continue
+      if (opt.pattern) {
+        if (hasMuscleArea) add({ key: opt.key, pattern: opt.pattern })
+        continue
+      }
+      if (opt.subAreas?.length) { for (const sub of opt.subAreas) add(sub); continue }
+      add({ key: opt.key, muscles: opt.muscles, groups: opt.groups })
+    }
+    if (out.length) return out
+  }
+  return targetMuscles?.length ? [{ key: 'target', muscles: targetMuscles }] : []
+}
+
+/**
+ * The candidate exercises for ONE area, resolved through its own tiers so a
+ * thin area is never silenced by a fat one:
+ *
+ *   1. dominant muscle match AND `muscle_group` match — the precise tier
+ *   2. dominant muscle match alone — the pre-existing behaviour
+ *   3. any primary muscle matches — last resort, so an area is never empty when
+ *      something in the catalogue genuinely trains it
+ *
+ * `lowImpact` lets the 'mobility' group in for the Mobility/Recovery purposes,
+ * where a leg stretch IS the right answer to "Legs" and tier 1 would otherwise
+ * throw away every stretch in the catalogue.
+ */
+function poolForArea(rows: ExerciseRow[], area: AreaSpec, lowImpact: boolean): ExerciseRow[] {
+  if (area.pattern) return rows.filter(e => e.movement_pattern === area.pattern)
+  const muscles = new Set(area.muscles ?? [])
+  if (!muscles.size) return []
+  const dominant = rows.filter(e => muscles.has(e.primary_muscles[0] ?? ''))
+  if (area.groups?.length) {
+    const groups = new Set(lowImpact ? [...area.groups, 'mobility'] : area.groups)
+    // A row with no muscle_group is kept — the column is optional (custom
+    // exercises, older rows), and dropping those would be a regression.
+    const precise = dominant.filter(e => !e.muscle_group || groups.has(e.muscle_group))
+    if (precise.length) return precise
+  }
+  if (dominant.length) return dominant
+  return rows.filter(e => e.primary_muscles.some(m => muscles.has(m)))
+}
+
+/**
+ * The order an area's picks cycle through its own movement patterns.
+ *
+ * The purpose's own priority comes first (so muscle_growth leads Legs with squat
+ * before hinge), then any remaining REAL resistance pattern. 'cardio' and
+ * 'mobility' are only ever included when the active purpose's scheme already
+ * wants them — the Jump-Rope-in-a-Legs-strength-session rule, see
+ * RESISTANCE_PATTERNS above. A pattern-based area (Cardio) always allows its own
+ * pattern: tapping the Cardio chip is an explicit request, not a nudge.
+ */
+function patternOrderForArea(
+  pool: ExerciseRow[], scheme: PurposeScheme, area: AreaSpec,
+): MovementPattern[] {
+  if (area.pattern) return [area.pattern]
+  const present = [...new Set(pool.map(e => e.movement_pattern as MovementPattern))]
+  const wanted = scheme.patternPriority.filter(p => present.includes(p))
+  const extra = present.filter(p => !wanted.includes(p) && RESISTANCE_PATTERNS.includes(p))
+  return [...wanted, ...extra]
+}
+
+/**
+ * Round-robin across areas, cycling each area's own patterns, inside the same
+ * honest time budget `selectExercises` uses.
+ *
+ * `seed` rotates which area leads. That matters most in the short windows: a
+ * 5-minute Core + Arms request only has slots for one or two exercises, and
+ * without rotation the first chip would win every single day.
+ */
+function selectBalanced(
+  areas: AreaSlot[],
+  scheme: PurposeScheme,
+  minutes: QuickMinutes,
+  seed: number,
+  fam: FamiliarityIndex = NO_HISTORY,
+): BuiltSelection {
+  const budget = minutes * 60
+  const MAX = maxExercisesFor(minutes)
+  const tuned = tuneScheme(scheme, minutes)
+  const cost = exerciseCostSeconds(tuned)
+  const noveltyAt = noveltySlotIndex(fam, MAX)
+
+  const live = areas.filter(a => a.order.length > 0)
+  if (!live.length) return { exercises: [], estimatedSeconds: 0 }
+  const rot = seed % live.length
+  const rotated = [...live.slice(rot), ...live.slice(0, rot)]
+
+  const chosen: QuickExercise[] = []
+  const used = new Set<string>()
+  let spent = 0
+
+  for (let round = 0; round < MAX && chosen.length < MAX; round++) {
+    let addedThisRound = false
+    for (const slot of rotated) {
+      if (chosen.length >= MAX) break
+      // Walk forward from this area's next pattern so it stays internally
+      // balanced, skipping patterns it has already exhausted.
+      let cand: ExerciseRow | null = null
+      for (let k = 0; k < slot.order.length && !cand; k++) {
+        const pattern = slot.order[(slot.picks + k) % slot.order.length]
+        cand = pickBest(
+          slot.byPattern[pattern] ?? [], used, seed + round,
+          fam, chosen.length === noveltyAt,
+        )
+      }
+      if (!cand) continue
+      // Always allow the first pick so even a 5-minute window yields a workout.
+      if (chosen.length > 0 && spent + cost > budget) continue
+      chosen.push({
+        id: cand.id,
+        name: cand.name,
+        movement_pattern: cand.movement_pattern,
+        primary_muscles: cand.primary_muscles,
+        sets: tuned.sets,
+        repLow: tuned.repLow,
+        repHigh: tuned.repHigh,
+        repUnit: tuned.repUnit,
+        restSeconds: tuned.restSeconds,
+      })
+      used.add(cand.id)
+      slot.picks++
+      spent += cost
+      addedThisRound = true
+    }
+    if (!addedThisRound) break
+  }
+
+  // Area round-robin interleaves the session (legs, arms, core, legs, arms…),
+  // which is the right way to ALLOCATE it and the wrong way to PERFORM it —
+  // curls before squats is backwards. Re-order by the purpose's own pattern
+  // priority so the compounds lead, keeping the rotation order within a rank
+  // (Array.prototype.sort is stable). Unranked patterns go last.
+  const rank = (p: string) => {
+    const i = scheme.patternPriority.indexOf(p as MovementPattern)
+    return i === -1 ? scheme.patternPriority.length : i
+  }
+  chosen.sort((a, b) => rank(a.movement_pattern) - rank(b.movement_pattern))
+
+  return { exercises: chosen, estimatedSeconds: spent }
+}
+
 // ── Copy generation ──────────────────────────────────────────────────────────
 
 // Fixed 2026-08-02, founder-requested: "15-Minute Muscle Builder" read as a
@@ -590,6 +860,34 @@ export function injuriesToRestrictions(injuries: string[] | undefined): QuickRes
   return { avoidMuscles: Array.from(new Set(avoidMuscles)), avoidPatterns: Array.from(new Set(avoidPatterns)) }
 }
 
+/**
+ * Merge the two kinds of restriction, honouring the difference between them.
+ *
+ * Injuries are a real constraint and always apply. Schedule avoidance is a
+ * PREFERENCE about what Tempo should pick on the user's behalf, and it was being
+ * applied as a hard constraint on top of what the user had explicitly asked for:
+ * generateQuickWorkout applies `avoidPatterns` before any muscle filter, so on a
+ * week with Push scheduled today and Legs tomorrow (push, squat and hinge all
+ * avoided) an explicit "Legs + Arms + Core" request literally could not return a
+ * leg exercise. What came back was core, a couple of curls, and whatever else
+ * survived — the founder's "mostly core and some random exercises" (2026-09-27).
+ *
+ * So when the user names a Target Area, the schedule stops voting. Tempo choosing
+ * for them ("Pick for me", or a route-driven "you missed leg day" suggestion) is
+ * exactly where the preference still belongs.
+ */
+export function composeRestrictions(
+  injury: QuickRestrictions,
+  schedule: QuickRestrictions | null,
+  explicitTarget: boolean,
+): QuickRestrictions {
+  const sched = explicitTarget || !schedule ? { avoidMuscles: [], avoidPatterns: [] } : schedule
+  return {
+    avoidMuscles: [...new Set([...injury.avoidMuscles, ...sched.avoidMuscles])],
+    avoidPatterns: [...new Set([...injury.avoidPatterns, ...sched.avoidPatterns])],
+  }
+}
+
 // The movement patterns a plan "focus" label trains — used to avoid pre-empting a
 // scheduled session (leg day tomorrow → don't burn legs on a Quick Workout today).
 function focusToPatterns(focus: string): MovementPattern[] {
@@ -639,9 +937,15 @@ export async function getScheduleRestrictions(
   // (founder, 2026-09-07). Avoiding what is scheduled is a PREFERENCE; producing
   // a usable workout is the requirement, so when the preference would leave
   // nothing to train it is dropped entirely.
+  //
+  // The threshold is TWO remaining, not one (raised 2026-09-27). "Push today,
+  // Legs tomorrow" avoids push, squat AND hinge, leaving only 'pull' — the floor
+  // did not fire, and the pool collapsed to core plus a couple of curls, which is
+  // the same bug with one pattern of camouflage. One resistance pattern cannot
+  // build a session any more than zero can.
   const RESISTANCE: MovementPattern[] = ['push', 'pull', 'squat', 'hinge']
   const remaining = RESISTANCE.filter(p => !avoid.has(p))
-  if (remaining.length === 0) return { avoidMuscles: [], avoidPatterns: [] }
+  if (remaining.length < 2) return { avoidMuscles: [], avoidPatterns: [] }
 
   return { avoidMuscles: [], avoidPatterns: [...avoid] }
 }
@@ -716,7 +1020,7 @@ export async function generateQuickWorkout(
   const [{ data: allRaw }, excludedExerciseIds] = await Promise.all([
     client
       .from('exercises')
-      .select('id, name, movement_pattern, primary_muscles, secondary_muscles, required_equipment, experience_level, is_core, popularity')
+      .select('id, name, movement_pattern, primary_muscles, secondary_muscles, required_equipment, experience_level, is_core, popularity, muscle_group')
       .is('user_id', null),
     fetchExcludedExerciseIds(client, userId),
   ])
@@ -753,36 +1057,27 @@ export async function generateQuickWorkout(
 
   // Target Area (Arms/Chest/Back/…): a hard filter to that muscle group, not
   // just a priority nudge — this is a direct "give me an X workout" request.
-  const targetMuscles = ctx.targetMuscles?.length ? new Set(ctx.targetMuscles) : null
-
-  // Match on the exercise's DOMINANT muscle — `primary_muscles[0]`, which this
-  // catalogue orders most-worked-first — not on "any listed primary muscle".
   //
-  // Matching any primary is far too loose, and produced three separate wrong
-  // sessions the founder actually received on 2026-09-04. Barbell Bench Press is
+  // Resolved into one AreaSpec PER SELECTED CHIP rather than a single flattened
+  // muscle union, because a union cannot be balanced and lets one area's matches
+  // stand in for another's. See selectBalanced's header for the full account of
+  // what that produced ("mostly core and some random exercises").
+  //
+  // Each area matches on the exercise's DOMINANT muscle — `primary_muscles[0]`,
+  // which this catalogue orders most-worked-first — not on "any listed primary
+  // muscle", refined by the catalogue's own `muscle_group` column. Matching any
+  // primary is far too loose, and produced three separate wrong sessions the
+  // founder actually received on 2026-09-04: Barbell Bench Press is
   // `['chest','triceps']`, so it satisfied an ARMS request; Push-Up is
-  // `['chest','triceps','shoulders']`, same. Conventional Deadlift is
+  // `['chest','triceps','shoulders']`, same; Conventional Deadlift is
   // `['hamstrings','glutes','erectors']`, so it satisfied a BACK request. In each
-  // case the exercise's actual purpose is the first muscle and the rest are
-  // along for the ride.
-  //
-  // `pickBest` ranks by how many muscles an exercise works, so a compound will
-  // always outrank a true isolation for the target — which is exactly why this
-  // has to be a filter and cannot be a sort preference. The loose rule is kept
-  // only as a last resort, for when NOTHING in the catalogue dominantly trains
-  // the requested area, so a target still never returns an empty pool.
-  const dominantlyMatches = (ex: ExerciseRow) =>
-    !!targetMuscles && targetMuscles.has(ex.primary_muscles[0] ?? '')
-  const looselyMatches = (ex: ExerciseRow) =>
-    !!targetMuscles && ex.primary_muscles.some(m => targetMuscles.has(m))
+  // case the exercise's actual purpose is the first muscle and the rest are along
+  // for the ride. `pickBest` ranks by how many muscles an exercise works, so a
+  // compound will always outrank a true isolation for the target — which is
+  // exactly why this has to be a filter and cannot be a sort preference. The loose
+  // rule survives inside poolForArea as a last resort only.
+  const areaSpecs = resolveTargetAreas(ctx.targetAreaKeys, ctx.targetMuscles)
 
-  const filterByMuscle = (rows: ExerciseRow[]) => {
-    if (!targetMuscles) return rows
-    const dominant = rows.filter(dominantlyMatches)
-    return dominant.length ? dominant : rows.filter(looselyMatches)
-  }
-
-  const coreMusclePool = filterByMuscle(corePool)
   // The 60-exercise curated set is deliberately small (is_core's own comment:
   // "the plan/quick-workout engines only program from this pool") and is
   // sometimes too thin for a specific muscle group + equipment combo — e.g. it
@@ -791,37 +1086,42 @@ export async function generateQuickWorkout(
   // the muscle target entirely (falling through to an unfiltered full-body pick,
   // which for no-equipment users skews heavily toward Core/Plank-type moves —
   // the reported "it always gives me Core no matter what I pick" bug). Widen to
-  // the full imported library — muscle-filtered the SAME way — whenever the
-  // curated pool alone can't fill the requested session length. This only ever
-  // ADDS candidates, and only when a real target is active, so a well-equipped
-  // user hitting the curated set fully still gets the higher-quality staples only.
-  const wideMusclePool = targetMuscles && coreMusclePool.length < maxExercisesFor(ctx.minutes)
-    ? filterByMuscle(fullPool())
-    : coreMusclePool
-  const musclePool = wideMusclePool.length > coreMusclePool.length ? wideMusclePool : coreMusclePool
-  const muscleTargetHit = !!targetMuscles && musclePool.length > 0
-  // Nothing anywhere (curated OR full library) matches this muscle target given
-  // the user's equipment/experience/restrictions — fall back to a full-body pick
-  // so a workout is always produced, preferring the wider library over just the
-  // 60 staples since it's strictly more likely to have something usable.
-  const finalPool = musclePool.length ? musclePool : (corePool.length ? corePool : fullPool())
-  // When the muscle filter actually landed exercises, guarantee every REAL
-  // RESISTANCE pattern present among THEM gets picked from, regardless of the
-  // purpose's own pattern list — a muscle-targeted request must never come
-  // back empty just because e.g. Mobility's priority doesn't include 'push'.
-  // 'cardio'/'mobility' are only force-included when the ACTIVE purpose's own
-  // scheme already wants them — see RESISTANCE_PATTERNS' comment for why.
-  const forcePatterns = muscleTargetHit
-    ? [...new Set(musclePool.map(ex => ex.movement_pattern as MovementPattern))]
-        .filter(p => RESISTANCE_PATTERNS.includes(p) || scheme.patternPriority.includes(p))
-    : undefined
+  // the full imported library — filtered the SAME way — whenever the curated pool
+  // alone can't fill an area's share of the session. Decided PER AREA now, since
+  // with several areas selected it is normal for one to be well stocked and
+  // another thin, and the old whole-pool test let the stocked one hide the thin
+  // one. This only ever ADDS candidates, and only when a real target is active,
+  // so a well-equipped user hitting the curated set fully still gets the
+  // higher-quality staples only.
+  const perAreaTarget = areaSpecs.length
+    ? Math.max(2, Math.ceil(maxExercisesFor(ctx.minutes) / areaSpecs.length))
+    : 0
+  let widened: ExerciseRow[] | null = null
+  const areaSlots: AreaSlot[] = areaSpecs.map(area => {
+    let pool = poolForArea(corePool, area, scheme.lowImpact)
+    if (pool.length < perAreaTarget) {
+      widened ??= fullPool()
+      const wide = poolForArea(widened, area, scheme.lowImpact)
+      if (wide.length > pool.length) pool = wide
+    }
+    const byPattern: Record<string, ExerciseRow[]> = {}
+    for (const ex of pool) (byPattern[ex.movement_pattern] ??= []).push(ex)
+    return { key: area.key, byPattern, order: patternOrderForArea(pool, scheme, area), picks: 0 }
+  })
+  // Did the target actually land anything trainable? If not — nothing anywhere
+  // (curated OR full library) matches it given the user's equipment, experience
+  // and restrictions — fall back to a full-body pick so a workout is always
+  // produced, preferring the wider library over just the 60 staples since it's
+  // strictly more likely to have something usable.
+  const areaTargetHit = areaSlots.some(a => a.order.length > 0)
+  const fallbackPool = corePool.length ? corePool : fullPool()
 
   const seed = dayOfYear() + ctx.minutes
 
   // ── "Pick for me" → a shortened version of the session you already have ─────
   // Only when the user expressed no preference at all. An explicit Target Area
   // or a route-driven pattern is a specific request and is answered literally.
-  if (!targetMuscles && !ctx.targetPattern) {
+  if (!areaSpecs.length && !ctx.targetPattern) {
     const planned = await findPlannedSessionForQuick(client, userId)
     if (planned) {
       const byId = new Map(gearOnlyPool.map(ex => [ex.id, ex]))
@@ -871,14 +1171,23 @@ export async function generateQuickWorkout(
   // What this user has actually trained before, so the session is built from
   // movements they know rather than whatever ranks highest in the abstract.
   const familiarity = await loadFamiliarity(client, userId)
-  const { exercises, estimatedSeconds } = selectExercises(
-    finalPool, scheme, ctx.minutes, ctx.targetPattern, seed, forcePatterns, familiarity,
-  )
+  // A landed Target Area selection is allocated area-first (selectBalanced);
+  // everything else — no target at all, a route-driven "missed leg day"
+  // pattern, or Cardio on its own — keeps the original pattern-priority
+  // selector untouched.
+  const { exercises, estimatedSeconds } = areaTargetHit
+    ? selectBalanced(areaSlots, scheme, ctx.minutes, seed, familiarity)
+    : selectExercises(
+        fallbackPool, scheme, ctx.minutes, ctx.targetPattern, seed, undefined, familiarity,
+      )
 
   return {
     minutes: ctx.minutes,
     purpose,
-    title: buildTitle(ctx.minutes, purpose, ctx.targetAreaLabel),
+    // Only claim the area in the title when the area actually landed. Otherwise
+    // this is the full-body fallback below, and calling it "40-Minute Arms
+    // Muscle" while it contains squats is a straight lie about what is in it.
+    title: buildTitle(ctx.minutes, purpose, areaTargetHit ? ctx.targetAreaLabel : null),
     why: buildWhy(ctx, purpose),
     contribution: buildContribution(purpose, profile.goal),
     structure: scheme.structure,
